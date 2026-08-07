@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenVPN Admin — Live Demo</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%2312161d'/%3E%3Cpath d='M20 4 L33 9.5 V19 C33 27 27.5 32.8 20 36 C12.5 32.8 7 27 7 19 V9.5 Z' fill='%23ee7623'/%3E%3Cpath d='M14 20.5 L18.3 25 L27 14.5' stroke='%2312161d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .demo-banner {
+    background: #ee7623; color: #12161d; font-weight: 600; font-size: 0.85rem;
+    text-align: center; padding: 9px 16px;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .demo-banner a { color: #12161d; text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="demo-banner">
+  Live demo &middot; fake data, nothing here is real &middot;
+  <a href="https://github.com/CodeScaffold/openvpn-dashboard" target="_blank" rel="noopener">get the code &amp; run your own &rarr;</a>
+</div>
+
+<!-- ================= LOGIN VIEW ================= -->
+<main id="login-view" class="view">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <div class="brand brand--stacked">
+      <svg class="brand-mark" width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path d="M20 3 L34 9 V19 C34 27.5 28 33.8 20 37 C12 33.8 6 27.5 6 19 V9 Z" stroke="var(--ov-orange)" stroke-width="2.5" fill="none"/>
+        <path d="M13.5 20.5 L18 25 L27 14.5" stroke="var(--ov-orange)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">OpenVPN</span><span class="brand-suffix">Admin</span>
+      </div>
+    </div>
+
+    <h1 class="login-title">Sign in</h1>
+    <p class="login-sub">Sign in to manage your VPN</p>
+
+    <label class="field">
+      <span class="field-label">Password</span>
+      <input id="login-password" type="password" name="password" required autocomplete="current-password" autofocus>
+    </label>
+
+    <button type="submit" class="btn btn--primary btn--block" id="login-submit">
+      <span class="btn-label">Sign in</span>
+      <span class="spinner" hidden aria-hidden="true"></span>
+    </button>
+
+    <p class="form-error" id="login-error" role="alert" aria-live="polite" hidden></p>
+  </form>
+</main>
+
+<!-- ================= DASHBOARD VIEW ================= -->
+<div id="dashboard-view" class="view app-shell" hidden>
+
+  <aside class="sidebar">
+    <div class="brand sidebar-brand">
+      <svg class="brand-mark brand-mark--sm" width="26" height="26" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path d="M20 3 L34 9 V19 C34 27.5 28 33.8 20 37 C12 33.8 6 27.5 6 19 V9 Z" stroke="var(--ov-orange)" stroke-width="2.5" fill="none"/>
+        <path d="M13.5 20.5 L18 25 L27 14.5" stroke="var(--ov-orange)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">OpenVPN</span><span class="brand-suffix">Admin</span>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      <a class="nav-item" href="#dashboard" data-page="dashboard" aria-current="page">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="3.5" width="7.5" height="4.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="10" width="7.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
+        Dashboard
+      </a>
+      <a class="nav-item" href="#endpoints" data-page="endpoints">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="14" width="17" height="6" rx="1.5" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="7" r="0.9" fill="currentColor"/><circle cx="7" cy="17" r="0.9" fill="currentColor"/></svg>
+        Endpoints
+      </a>
+      <a class="nav-item" href="#clients" data-page="clients">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M16 4.5c1.4.4 2.5 1.7 2.5 3.3s-1.1 2.9-2.5 3.3M19 19c0-2.5-1.6-4.3-3.7-4.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Clients
+      </a>
+      <a class="nav-item" href="#settings" data-page="settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2.3M12 18.2v2.3M20.5 12h-2.3M5.8 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Settings
+      </a>
+    </nav>
+
+    <button class="btn btn--ghost sidebar-logout" id="logout-btn" type="button">Log out</button>
+  </aside>
+
+  <main class="content">
+
+    <!-- ---------- DASHBOARD PAGE ---------- -->
+    <section class="page" id="page-dashboard">
+      <div class="action-bar">
+        <div class="action-bar-status">
+          <span class="status-pill" id="ovpn-status-pill"><span class="status-dot" id="ovpn-status-dot" aria-hidden="true"></span><span id="ovpn-status-text">OpenVPN</span></span>
+          <span class="action-bar-version">server</span>
+        </div>
+        <div class="action-bar-group">
+          <button class="action-btn action-btn--primary" id="btn-restart">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Restart
+          </button>
+          <button class="action-btn" id="btn-stop-start">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span id="btn-stop-start-label">Stop</span>
+          </button>
+        </div>
+        <span class="action-bar-divider"></span>
+        <div class="action-bar-group">
+          <button class="action-btn" id="btn-logs">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5h14v15H5z" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h8M8 12.5h8M8 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            Logs
+          </button>
+          <button class="action-btn" id="btn-config">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4.5" width="16" height="15" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h4M8 12.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            Config
+          </button>
+        </div>
+      </div>
+
+      <div class="health-banner" id="health-banner" hidden>
+        <span class="health-mark" aria-hidden="true"></span>
+        <span id="health-text"></span>
+      </div>
+
+      <div class="vital-grid">
+        <div class="vital-tile">
+          <div class="vital-head">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l1.8 1.8M16.2 16.2 18 18M18 6l-1.8 1.8M7.8 16.2 6 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span class="vital-label">CPU</span>
+          </div>
+          <span class="vital-value" id="m-cpu">&mdash;</span>
+          <span class="vital-detail" id="m-cpu-detail">&nbsp;</span>
+          <div class="vital-spark" id="spark-cpu"></div>
+          <div class="vital-foot"><span id="m-cpu-avg">avg &mdash;</span><span id="m-cpu-peak">peak &mdash;</span></div>
+        </div>
+        <div class="vital-tile">
+          <div class="vital-head">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h4M8 12.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span class="vital-label">Memory</span>
+          </div>
+          <span class="vital-value" id="m-mem">&mdash;</span>
+          <span class="vital-detail" id="m-mem-detail">&nbsp;</span>
+          <div class="vital-spark" id="spark-mem"></div>
+          <div class="vital-foot"><span id="m-mem-avg">avg &mdash;</span><span id="m-mem-peak">peak &mdash;</span></div>
+        </div>
+        <div class="vital-tile">
+          <div class="vital-head">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3c3 4 6 7.2 6 10.5A6 6 0 1 1 6 13.5C6 10.2 9 7 12 3Z" stroke="currentColor" stroke-width="1.6"/></svg>
+            <span class="vital-label">Swap</span>
+          </div>
+          <span class="vital-value" id="m-swap">&mdash;</span>
+          <span class="vital-detail" id="m-swap-detail">&nbsp;</span>
+          <div class="vital-spark" id="spark-swap"></div>
+          <div class="vital-foot"><span id="m-swap-avg">avg &mdash;</span><span id="m-swap-peak">peak &mdash;</span></div>
+        </div>
+        <div class="vital-tile">
+          <div class="vital-head">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.4" stroke="currentColor" stroke-width="1.6"/><path d="M5 6v12c0 1.3 3.1 2.4 7 2.4s7-1.1 7-2.4V6" stroke="currentColor" stroke-width="1.6"/><path d="M5 12c0 1.3 3.1 2.4 7 2.4s7-1.1 7-2.4" stroke="currentColor" stroke-width="1.6"/></svg>
+            <span class="vital-label">Storage</span>
+          </div>
+          <span class="vital-value" id="m-disk">&mdash;</span>
+          <span class="vital-detail" id="m-disk-detail">&nbsp;</span>
+          <div class="vital-spark" id="spark-disk"></div>
+          <div class="vital-foot"><span id="m-disk-free">free &mdash;</span><span id="m-disk-avg">avg &mdash;</span></div>
+        </div>
+      </div>
+
+      <div class="chart-row">
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <div>
+              <h2>Overall speed</h2>
+              <p class="panel-sub">eth0 &middot; last 15 minutes</p>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-swatch legend-swatch--rx"></span>Down <b id="chart-rx-now">&mdash;</b></span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch--tx"></span>Up <b id="chart-tx-now">&mdash;</b></span>
+            </div>
+          </div>
+          <div id="throughput-chart" class="chart"></div>
+          <div class="chart-foot">
+            <div><span class="tile-label">Sent</span><b id="foot-sent">&mdash;</b></div>
+            <div><span class="tile-label">Received</span><b id="foot-received">&mdash;</b></div>
+            <div><span class="tile-label">Avg over window</span><b id="foot-avg-speed">&mdash;</b></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <div>
+              <h2>Connection stats</h2>
+              <p class="panel-sub">Active sessions by transport</p>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-swatch legend-swatch--rx"></span>TCP <b id="chart-tcp-now">&mdash;</b></span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch--tx"></span>UDP <b id="chart-udp-now">&mdash;</b></span>
+            </div>
+          </div>
+          <div id="connections-chart" class="chart"></div>
+          <div class="chart-foot chart-foot--single">
+            <div><span class="tile-label">Open sessions</span><b id="foot-open-sessions">&mdash;</b></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="info-strip">
+        <div class="info-block">
+          <span class="tile-label">Uptime</span>
+          <div class="info-row"><span>OpenVPN</span><b id="info-ovpn-uptime">&mdash;</b></div>
+          <div class="info-row"><span>OS</span><b id="info-os-uptime">&mdash;</b></div>
+        </div>
+        <div class="info-block">
+          <span class="tile-label">Panel</span>
+          <div class="info-row"><span>RAM</span><b id="info-panel-ram">&mdash;</b></div>
+          <div class="info-row"><span>Poll</span><b>15s</b></div>
+        </div>
+        <div class="info-block">
+          <span class="tile-label">
+            IP address
+            <button class="icon-toggle" id="ip-toggle" type="button" aria-label="Show/hide IP address">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>
+            </button>
+          </span>
+          <div class="info-row"><span>Public</span><b id="info-ip" class="ip-blur">&bull;&bull;&bull;.&bull;&bull;&bull;.&bull;&bull;&bull;.&bull;&bull;&bull;</b></div>
+        </div>
+      </div>
+
+      <div class="tile-grid tile-grid--stats">
+        <div class="tile tile--stat">
+          <span class="tile-label">Endpoints</span>
+          <span class="tile-value" id="stat-endpoints">&mdash;</span>
+        </div>
+        <div class="tile tile--stat">
+          <span class="tile-label">Clients</span>
+          <span class="tile-value" id="stat-clients">&mdash;</span>
+        </div>
+        <div class="tile tile--stat">
+          <span class="tile-label">Online now</span>
+          <span class="tile-value stat-value--accent" id="stat-online">&mdash;</span>
+        </div>
+        <div class="tile tile--stat">
+          <span class="tile-label">Data used</span>
+          <span class="tile-value" id="stat-data">&mdash;</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- ENDPOINTS PAGE ---------- -->
+    <section class="page" id="page-endpoints" hidden>
+      <div class="page-head">
+        <h1>Endpoints</h1>
+        <button class="btn btn--primary" id="open-create-endpoint">+ Create endpoint</button>
+      </div>
+      <p class="page-sub">Each endpoint is its own independent OpenVPN listener with its own port, protocol, and cipher &mdash; add one on port 443/TCP to blend in as ordinary HTTPS, or spread clients across a few for redundancy. Every client can connect through any endpoint you create.</p>
+
+      <div class="card-grid" id="endpoints-grid"></div>
+    </section>
+
+    <!-- ---------- CLIENTS PAGE ---------- -->
+    <section class="page" id="page-clients" hidden>
+      <div class="page-head">
+        <h1>Clients</h1>
+        <button class="btn btn--primary" id="open-create-client">+ Create client</button>
+      </div>
+      <p class="page-sub">Each client is a separate certificate someone can install on a device. Set a connection cap, data quota, or bandwidth limit per person, and download a ready-to-import <code>.ovpn</code> profile the moment they're created.</p>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table class="table" id="clients-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Status</th>
+                <th scope="col">Created</th>
+                <th scope="col">Expires</th>
+                <th scope="col">Limits</th>
+                <th scope="col" class="col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="clients-tbody"></tbody>
+          </table>
+          <div class="empty-state" id="clients-empty" hidden>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M16 4.5c1.4.4 2.5 1.7 2.5 3.3s-1.1 2.9-2.5 3.3M19 19c0-2.5-1.6-4.3-3.7-4.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <span>No clients yet.</span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ---------- SETTINGS PAGE ---------- -->
+    <section class="page" id="page-settings" hidden>
+      <div class="page-head"><h1>Settings</h1></div>
+      <p class="page-sub">Single shared admin account &middot; no per-user login</p>
+
+      <div class="settings-tabs" role="tablist">
+        <button class="settings-tab" data-tab="account" aria-current="page">Account</button>
+        <button class="settings-tab" data-tab="security">Security</button>
+        <button class="settings-tab" data-tab="notifications">Notifications</button>
+        <button class="settings-tab" data-tab="clients">Clients</button>
+        <button class="settings-tab" data-tab="backup">Backup</button>
+        <button class="settings-tab" data-tab="advanced">Advanced</button>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-account">
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Admin password</h2>
+            <span class="panel-meta">Signs out every other session</span>
+          </div>
+          <form id="password-form">
+            <label class="field">
+              <span class="field-label">Current password</span>
+              <input id="pw-current" type="password" required autocomplete="current-password">
+            </label>
+            <label class="field">
+              <span class="field-label">New password (min. 8 characters)</span>
+              <input id="pw-new" type="password" required minlength="8" autocomplete="new-password">
+            </label>
+            <button type="submit" class="btn btn--primary" id="password-submit">
+              <span class="btn-label">Update password</span>
+              <span class="spinner" hidden aria-hidden="true"></span>
+            </button>
+            <p class="form-error" id="password-error" role="alert" aria-live="polite" hidden></p>
+          </form>
+        </section>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-security" hidden>
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Idle timeout &amp; lockout</h2>
+            <span class="panel-meta">Applies to the login form</span>
+          </div>
+          <form id="security-form">
+            <label class="field">
+              <span class="field-label">Idle session timeout (minutes) &mdash; 0 = never</span>
+              <input id="sec-timeout" type="number" min="0" max="10080" value="0">
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">Lockout after (attempts)</span>
+                <input id="sec-lockout-attempts" type="number" min="2" max="20" value="5">
+              </label>
+              <label class="field">
+                <span class="field-label">Lockout for (seconds)</span>
+                <input id="sec-lockout-seconds" type="number" min="30" max="86400" value="300">
+              </label>
+            </div>
+            <button type="submit" class="btn btn--primary" id="security-submit">
+              <span class="btn-label">Save</span>
+              <span class="spinner" hidden aria-hidden="true"></span>
+            </button>
+            <p class="form-error" id="security-error" role="alert" aria-live="polite" hidden></p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Where you're signed in</h2>
+            <span class="panel-meta">Same admin password, other browsers</span>
+          </div>
+          <p class="panel-sub" style="margin-bottom:14px">This tab keeps its session. Every other browser or device currently signed in with this password is immediately signed out.</p>
+          <button type="button" class="btn btn--ghost" id="logout-others-btn">
+            <span class="btn-label">Sign out everywhere else</span>
+            <span class="spinner" hidden aria-hidden="true"></span>
+          </button>
+        </section>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-notifications" hidden>
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Notifications</h2>
+            <span class="panel-meta">Quota hits, connection kills, endpoint up/down, restarts</span>
+          </div>
+          <form id="notify-form">
+            <label class="switch-row">
+              <span class="field-label">Generic webhook</span>
+              <span class="switch"><input id="notify-webhook-enabled" type="checkbox"><span class="switch-track"></span></span>
+            </label>
+            <label class="field">
+              <span class="field-label">Webhook URL</span>
+              <input id="notify-webhook-url" type="text" placeholder="https://example.com/hook">
+            </label>
+            <label class="switch-row">
+              <span class="field-label">Telegram bot</span>
+              <span class="switch"><input id="notify-telegram-enabled" type="checkbox"><span class="switch-track"></span></span>
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">Bot token</span>
+                <input id="notify-telegram-token" type="text" placeholder="123456:AA...">
+              </label>
+              <label class="field">
+                <span class="field-label">Chat ID</span>
+                <input id="notify-telegram-chat" type="text" placeholder="123456789">
+              </label>
+            </div>
+            <div class="dialog-actions" style="justify-content:flex-start">
+              <button type="submit" class="btn btn--primary" id="notify-submit">
+                <span class="btn-label">Save</span>
+                <span class="spinner" hidden aria-hidden="true"></span>
+              </button>
+              <button type="button" class="btn btn--ghost" id="notify-test">
+                <span class="btn-label">Send test</span>
+                <span class="spinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
+            <p class="form-error" id="notify-error" role="alert" aria-live="polite" hidden></p>
+          </form>
+        </section>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-clients" hidden>
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>New-client defaults</h2>
+            <span class="panel-meta">Pre-fills the "New client" form only</span>
+          </div>
+          <form id="defaults-form">
+            <label class="field">
+              <span class="field-label">Max simultaneous connections</span>
+              <input id="def-max-conn" type="number" min="1" max="10" value="1" required>
+            </label>
+            <label class="field">
+              <span class="field-label">Data quota (GB) &mdash; blank = unlimited</span>
+              <input id="def-quota" type="number" min="0.1" step="0.1" placeholder="unlimited">
+            </label>
+            <label class="field">
+              <span class="field-label">Bandwidth cap (Mbps) &mdash; blank = unlimited</span>
+              <input id="def-bandwidth" type="number" min="0.1" step="0.1" placeholder="unlimited">
+            </label>
+            <label class="field">
+              <span class="field-label">Certificate validity</span>
+              <select id="def-validity-preset">
+                <option value="30">1 month</option>
+                <option value="90">3 months</option>
+                <option value="180">6 months</option>
+                <option value="365" selected>1 year</option>
+                <option value="730">2 years</option>
+                <option value="1825">5 years</option>
+                <option value="custom">Until specific date&hellip;</option>
+              </select>
+            </label>
+            <label class="field" id="def-validity-until-wrap" hidden>
+              <span class="field-label">Expires on</span>
+              <input id="def-validity-until" type="date">
+            </label>
+            <button type="submit" class="btn btn--primary" id="defaults-submit">
+              <span class="btn-label">Save</span>
+              <span class="spinner" hidden aria-hidden="true"></span>
+            </button>
+            <p class="form-error" id="defaults-error" role="alert" aria-live="polite" hidden></p>
+          </form>
+        </section>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-backup" hidden>
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Download backup</h2>
+            <span class="panel-meta">Contains your CA private key</span>
+          </div>
+          <p class="panel-sub" style="margin-bottom:14px">A single <code>.tar.gz</code>: PKI, endpoint configs, client database, and admin settings. Store it like a root credential.</p>
+          <a class="btn btn--ghost" id="backup-download" href="/api/backup" download>
+            <span class="btn-label">Download backup (.tar.gz)</span>
+          </a>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Restore from backup</h2>
+            <span class="panel-meta">Auto-snapshots the current state first</span>
+          </div>
+          <label class="field">
+            <span class="field-label">Backup file</span>
+            <input id="restore-file" type="file" accept=".tar.gz,.tgz">
+          </label>
+          <button type="button" class="btn btn--danger" id="restore-open">Restore&hellip;</button>
+        </section>
+      </div>
+
+      <div class="settings-panel" id="settings-panel-advanced" hidden>
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>Metrics retention</h2>
+            <span class="panel-meta">~15s per sample</span>
+          </div>
+          <form id="retention-form">
+            <label class="field">
+              <span class="field-label">History length (samples)</span>
+              <input id="retention-points" type="number" min="20" max="1440" value="60" required>
+            </label>
+            <button type="submit" class="btn btn--primary" id="retention-submit">
+              <span class="btn-label">Save</span>
+              <span class="spinner" hidden aria-hidden="true"></span>
+            </button>
+            <p class="form-error" id="retention-error" role="alert" aria-live="polite" hidden></p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head panel-head--row">
+            <h2>About</h2>
+          </div>
+          <p class="limits-usage">
+            OpenVPN Admin <span id="panel-version" class="mono-inline"></span><br>
+            <a id="panel-repo-link" href="#" target="_blank" rel="noopener">Source on GitHub</a>
+          </p>
+        </section>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Create endpoint -->
+<dialog id="endpoint-dialog" class="dialog">
+  <form method="dialog" class="dialog-card" id="endpoint-form">
+    <h2>New endpoint</h2>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="ep-name" type="text" placeholder="e.g. tcp-443" pattern="[a-z0-9-]{1,24}" title="Lowercase letters, numbers, dashes only" required>
+    </label>
+    <div class="field-row">
+      <label class="field">
+        <span class="field-label">Protocol</span>
+        <select id="ep-protocol"><option value="udp">UDP</option><option value="tcp">TCP</option></select>
+      </label>
+      <label class="field">
+        <span class="field-label">Port</span>
+        <input id="ep-port" type="number" min="1" max="65535" value="1194" required>
+      </label>
+    </div>
+    <label class="field">
+      <span class="field-label">Cipher</span>
+      <select id="ep-cipher">
+        <option value="AES-128-GCM">AES-128-GCM</option>
+        <option value="AES-256-GCM">AES-256-GCM</option>
+        <option value="CHACHA20-POLY1305">CHACHA20-POLY1305</option>
+      </select>
+    </label>
+    <div class="field-row">
+      <label class="field">
+        <span class="field-label">DNS 1</span>
+        <input id="ep-dns1" type="text" value="1.1.1.1">
+      </label>
+      <label class="field">
+        <span class="field-label">DNS 2</span>
+        <input id="ep-dns2" type="text" value="1.0.0.1">
+      </label>
+    </div>
+    <p class="form-error" id="endpoint-error" role="alert" aria-live="polite" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="endpoint-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="endpoint-submit">
+        <span class="btn-label">Create &amp; start</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Delete endpoint confirmation -->
+<dialog id="endpoint-delete-dialog" class="dialog">
+  <form method="dialog" class="dialog-card">
+    <h2>Delete <span id="endpoint-delete-target"></span>?</h2>
+    <p class="dialog-body">Anyone currently connected through it will be dropped. This can't be undone.</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="endpoint-delete-cancel">Cancel</button>
+      <button type="button" class="btn btn--danger" id="endpoint-delete-confirm">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Create client -->
+<dialog id="client-dialog" class="dialog">
+  <form method="dialog" class="dialog-card dialog-card--wide" id="client-form">
+    <h2>New client</h2>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="new-client-name" type="text" placeholder="e.g. arash-phone" pattern="[A-Za-z0-9_\-]{1,32}" title="Letters, numbers, - and _ only" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Max simultaneous connections</span>
+      <input id="new-client-max-conn" type="number" min="1" max="10" value="1" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Data quota (GB) &mdash; blank = unlimited</span>
+      <input id="new-client-quota" type="number" min="0.1" step="0.1" placeholder="unlimited">
+    </label>
+    <label class="field">
+      <span class="field-label">Bandwidth cap (Mbps) &mdash; blank = unlimited</span>
+      <input id="new-client-bandwidth" type="number" min="0.1" step="0.1" placeholder="unlimited">
+    </label>
+    <label class="field">
+      <span class="field-label">Certificate validity</span>
+      <select id="new-client-validity-preset">
+        <option value="30">1 month</option>
+        <option value="90">3 months</option>
+        <option value="180">6 months</option>
+        <option value="365" selected>1 year</option>
+        <option value="730">2 years</option>
+        <option value="1825">5 years</option>
+        <option value="custom">Until specific date&hellip;</option>
+      </select>
+    </label>
+    <label class="field" id="new-client-validity-until-wrap" hidden>
+      <span class="field-label">Expires on</span>
+      <input id="new-client-validity-until" type="date">
+    </label>
+    <p class="form-error" id="client-error" role="alert" aria-live="polite" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="client-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="client-submit">
+        <span class="btn-label">Create &amp; download config</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Revoke confirmation -->
+<dialog id="revoke-dialog" class="dialog">
+  <form method="dialog" class="dialog-card">
+    <h2>Revoke <span id="revoke-target"></span>?</h2>
+    <p class="dialog-body">This immediately invalidates their <code>.ovpn</code> profile. This can't be undone.</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="revoke-cancel">Cancel</button>
+      <button type="button" class="btn btn--danger" id="revoke-confirm">
+        <span class="btn-label">Revoke</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Limits editor -->
+<dialog id="limits-dialog" class="dialog">
+  <form method="dialog" class="dialog-card dialog-card--wide" id="limits-form">
+    <h2>Limits for <span id="limits-target"></span></h2>
+    <label class="field">
+      <span class="field-label">Max simultaneous connections</span>
+      <input id="limits-max-connections" type="number" min="1" max="10" value="1" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Data quota (GB) &mdash; blank = unlimited</span>
+      <input id="limits-quota" type="number" min="0.1" step="0.1" placeholder="unlimited">
+    </label>
+    <label class="field">
+      <span class="field-label">Bandwidth cap (Mbps) &mdash; blank = unlimited</span>
+      <input id="limits-bandwidth" type="number" min="0.1" step="0.1" placeholder="unlimited">
+    </label>
+    <p class="limits-usage" id="limits-usage"></p>
+    <p class="form-error" id="limits-error" role="alert" aria-live="polite" hidden></p>
+
+    <div class="panel-divider"></div>
+    <p class="limits-usage" id="limits-expiry"></p>
+    <label class="field">
+      <span class="field-label">Renew for</span>
+      <select id="limits-validity-preset">
+        <option value="30">1 month</option>
+        <option value="90">3 months</option>
+        <option value="180">6 months</option>
+        <option value="365" selected>1 year</option>
+        <option value="730">2 years</option>
+        <option value="1825">5 years</option>
+        <option value="custom">Until specific date&hellip;</option>
+      </select>
+    </label>
+    <label class="field" id="limits-validity-until-wrap" hidden>
+      <span class="field-label">Expires on</span>
+      <input id="limits-validity-until" type="date">
+    </label>
+    <button type="button" class="btn btn--ghost btn--block" id="limits-renew">
+      <span class="btn-label">Renew certificate</span>
+      <span class="spinner" hidden aria-hidden="true"></span>
+    </button>
+    <p class="panel-sub" style="margin:8px 0 0">Renewing replaces the certificate &mdash; the client's current <code>.ovpn</code> file stops working immediately. Download a fresh one afterward.</p>
+    <p class="form-error" id="limits-renew-error" role="alert" aria-live="polite" hidden></p>
+
+    <div class="dialog-actions dialog-actions--split">
+      <button type="button" class="btn btn--ghost" id="limits-reset-usage">Reset usage &amp; re-enable</button>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn--ghost" id="limits-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="limits-submit">
+          <span class="btn-label">Save</span>
+          <span class="spinner" hidden aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<!-- Download endpoint picker -->
+<dialog id="download-dialog" class="dialog">
+  <div class="dialog-card">
+    <h2>Download config for <span id="download-target"></span></h2>
+    <p class="dialog-body">Pick which endpoint this profile should connect through.</p>
+    <div id="download-endpoint-list" class="download-list"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="download-cancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Logs viewer -->
+<dialog id="logs-dialog" class="dialog">
+  <div class="dialog-card dialog-card--xwide">
+    <h2>OpenVPN logs <span class="dialog-sub">server &middot; last 200 lines</span></h2>
+    <pre class="log-view" id="logs-content">Loading&hellip;</pre>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="logs-refresh">Refresh</button>
+      <button type="button" class="btn btn--primary" id="logs-close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Config viewer -->
+<dialog id="config-dialog" class="dialog">
+  <div class="dialog-card dialog-card--xwide">
+    <h2>server.conf <span class="dialog-sub">read-only</span></h2>
+    <pre class="log-view" id="config-content">Loading&hellip;</pre>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--primary" id="config-close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Restore confirmation -->
+<dialog id="restore-dialog" class="dialog">
+  <form method="dialog" class="dialog-card" id="restore-form">
+    <h2>Restore from backup?</h2>
+    <p class="dialog-body">This overwrites the live PKI, endpoint configs, client database and admin settings, then restarts the panel. A safety snapshot of the current state is taken automatically first. Type <strong>RESTORE</strong> to confirm.</p>
+    <label class="field">
+      <span class="field-label">Confirmation</span>
+      <input id="restore-confirm-text" type="text" autocomplete="off" required>
+    </label>
+    <p class="form-error" id="restore-error" role="alert" aria-live="polite" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="restore-cancel">Cancel</button>
+      <button type="submit" class="btn btn--danger" id="restore-submit">
+        <span class="btn-label">Restore &amp; restart</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="demo-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

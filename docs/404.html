@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenVPN Admin — demo</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0a0c10; color: #e7e9ed;
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  .card {
+    max-width: 460px; background: #12151b; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px; padding: 32px; text-align: center;
+    box-shadow: 0 12px 32px -8px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 1.15rem; margin: 0 0 12px; }
+  p { color: #8b93a1; font-size: 0.92rem; margin: 0 0 20px; }
+  a {
+    display: inline-block; background: #ee7623; color: #fff; text-decoration: none;
+    font-weight: 600; padding: 10px 18px; border-radius: 10px; font-size: 0.9rem;
+  }
+  a:hover { background: #d6661a; }
+  code { font-family: ui-monospace, monospace; background: rgba(238,118,35,0.14); color: #ee7623; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>That's the file endpoint</h1>
+    <p>This is a static demo — clicks that would download a real <code>.ovpn</code> profile don't have a server behind them here. Everything else in the dashboard is fully interactive against fake data.</p>
+    <a href="javascript:history.back()">← Back to the demo</a>
+  </div>
+</body>
+</html>

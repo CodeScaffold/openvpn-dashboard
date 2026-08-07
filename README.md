@@ -4,12 +4,7 @@ A self-hosted admin panel for OpenVPN. FastAPI backend, no-build-step vanilla HT
 
 ![Dashboard](docs/screenshots/dashboard.jpg)
 
-No login is included in these screenshots — everything above and below is a real, currently-running install, with the real charts and real (if small) client list.
-
-| | |
-|---|---|
-| ![Clients](docs/screenshots/clients.jpg) | ![Endpoints](docs/screenshots/endpoints.jpg) |
-| ![Settings](docs/screenshots/settings.jpg) | |
+**[Try the live demo →](https://codescaffold.github.io/openvpn-dashboard/demo/)** — the real frontend, running against fake (but realistic, live-updating) data. No install, no login, nothing to set up. Click around: create a client, hover the charts, poke through Settings.
 
 ## What it does
 
@@ -22,6 +17,37 @@ No login is included in these screenshots — everything above and below is a re
 ## Architecture, in one paragraph
 
 Each "endpoint" is a normal `openvpn-server@<name>` systemd instance with its own `server.conf`, subnet, and management port, all sharing one PKI (one CA, one CRL). The dashboard is a FastAPI app running as an unprivileged `ovpndash` user, talking to `easy-rsa` via subprocess for certs, to OpenVPN's management sockets for live sessions, and to `tc`/`ufw`/`systemctl` via a handful of tightly-scoped `sudo` grants for the handful of things that genuinely need root. There is no message queue, no separate frontend build, no Redis, no database server — SQLite and flat files, on purpose.
+
+## Docker (fastest install)
+
+The container runs systemd as PID 1 so it's the *exact same* app internally — `systemctl`, the sudoers grants, `journalctl` for the log viewer, all of it works unchanged, just inside the container instead of on bare metal. First boot generates the PKI, an OpenVPN endpoint, and an admin password automatically; nothing to configure by hand.
+
+```bash
+git clone https://github.com/CodeScaffold/openvpn-dashboard
+cd openvpn-dashboard
+sed -i 's/vpn.example.com/YOUR_SERVER_IP_OR_DOMAIN/' docker-compose.yml
+docker compose up -d --build
+docker compose logs | grep "Admin password"   # shown once, on first boot only
+```
+
+Then visit `http://YOUR_SERVER_IP_OR_DOMAIN:8080`.
+
+That's it — OpenVPN and the dashboard are both running, on `1194/udp` and `8080/tcp` respectively, with a generated admin password waiting in the logs. Put a real reverse proxy + TLS in front of port 8080 for anything beyond testing (same nginx config as [step 10](#10-reverse-proxy--tls) below, just proxying to `127.0.0.1:8080` on the host — host networking means the container's port *is* the host's port, nothing container-specific needed).
+
+**Why `--privileged` and host networking:** OpenVPN needs to configure real NAT/routing for tunneled traffic, which bridge networking can't do transparently — this is standard for any containerized VPN server, not specific to this app. `--privileged` (rather than a hand-picked capability list) is what lets systemd manage cgroups cleanly as PID 1; if you want a tighter capability set instead, `docker-compose.yml` is one file, start from `cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]` and iterate.
+
+**Configuration** — set as environment variables in `docker-compose.yml` (or `-e` flags on `docker run`):
+
+| Variable | Required | Default | What it does |
+|---|---|---|---|
+| `VPN_ENDPOINT` | yes | — | The address baked into every client's `.ovpn` (your domain or the bare IP) |
+| `ADMIN_PASSWORD` | no | random, printed to logs once | Initial admin password |
+| `OPENVPN_PORT` | no | `1194` | Base endpoint's port |
+| `OPENVPN_PROTO` | no | `udp` | Base endpoint's protocol |
+
+Data (the PKI, client database, admin settings) lives in two named Docker volumes (`ovpn-config`, `dashboard-config`) — `docker compose down` is safe, `docker compose down -v` deletes everything.
+
+Not interested in Docker? Everything below is the same install, done by hand, for people who'd rather own every step (or aren't on a systemd + cgroup v2 host Docker likes).
 
 ## Requirements
 
@@ -321,6 +347,8 @@ systemctl restart ovpn-dashboard
 ```
 
 Nothing here touches `/etc/openvpn/*` — application updates and VPN operation are fully decoupled.
+
+Docker: `git pull && docker compose up -d --build`. The named volumes mean your PKI, clients, and settings survive the rebuild untouched.
 
 ## Troubleshooting
 

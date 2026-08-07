@@ -1,0 +1,12 @@
+[Unit]
+Description=ovpn-dashboard first-boot setup (PKI, config, service enablement)
+After=network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/docker-env
+ExecStart=/usr/local/bin/first-boot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
