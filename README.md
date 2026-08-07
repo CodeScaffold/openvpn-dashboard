@@ -2,8 +2,6 @@
 
 A self-hosted admin panel for OpenVPN. FastAPI backend, no-build-step vanilla HTML/CSS/JS frontend, single binary-ish deploy (one systemd service, one Python venv). Built for people who want a real UI on top of OpenVPN — creating clients, setting limits, watching traffic — instead of hand-editing configs and juggling `easy-rsa` from memory.
 
-![Dashboard](docs/screenshots/dashboard.jpg)
-
 **[Try the live demo →](https://codescaffold.github.io/openvpn-dashboard/demo/)** — the real frontend, running against fake (but realistic, live-updating) data. No install, no login, nothing to set up. Click around: create a client, hover the charts, poke through Settings.
 
 ## What it does
@@ -47,7 +45,12 @@ That's it — OpenVPN and the dashboard are both running, on `1194/udp` and `808
 
 Data (the PKI, client database, admin settings) lives in two named Docker volumes (`ovpn-config`, `dashboard-config`) — `docker compose down` is safe, `docker compose down -v` deletes everything.
 
-Not interested in Docker? Everything below is the same install, done by hand, for people who'd rather own every step (or aren't on a systemd + cgroup v2 host Docker likes).
+**Updating:** `git pull && docker compose up -d --build`. The named volumes mean your PKI, clients, and settings survive the rebuild untouched.
+
+Not interested in Docker? Same install, done by hand, for people who'd rather own every step (or aren't on a systemd + cgroup v2 host Docker likes) — expand below.
+
+<details>
+<summary><strong>Manual install (no Docker) — click to expand</strong></summary>
 
 ## Requirements
 
@@ -337,7 +340,7 @@ From there:
 4. Optional: **Settings → Notifications** for a webhook or Telegram bot ping when a client hits its quota, gets killed for too many connections, or an endpoint goes down.
 5. Optional: **Settings → Backup** — download a `.tar.gz` now and put it somewhere durable. It contains your CA private key; treat it like a root credential, not a config file.
 
-## Updating
+### Updating (manual install)
 
 ```bash
 cd /opt/ovpn-dashboard
@@ -347,8 +350,6 @@ systemctl restart ovpn-dashboard
 ```
 
 Nothing here touches `/etc/openvpn/*` — application updates and VPN operation are fully decoupled.
-
-Docker: `git pull && docker compose up -d --build`. The named volumes mean your PKI, clients, and settings survive the rebuild untouched.
 
 ## Troubleshooting
 
@@ -363,6 +364,8 @@ Docker: `git pull && docker compose up -d --build`. The named volumes mean your 
 **Logs are empty in the dashboard's log viewer.** `ovpndash` needs to be in the `systemd-journal` group (step 6) — group membership from `usermod -aG` doesn't apply retroactively to a running process, so restart the `ovpn-dashboard` service (not just re-login) after adding it.
 
 **Restore doesn't seem to finish.** It's supposed to look like that. On success the process deliberately exits non-zero so `systemd`'s `Restart=on-failure` brings up a clean process with fresh file handles — the dashboard reloads itself ~1.5 seconds after showing "Restore complete."
+
+</details>
 
 ## Security notes
 
