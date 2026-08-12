@@ -66,6 +66,25 @@
       </div>
     </div>
 
+    <div class="server-switcher" id="server-switcher">
+      <button class="server-switcher-btn" id="server-switcher-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <span class="status-dot status-dot--off" id="switcher-status-dot" aria-hidden="true"></span>
+        <span class="server-switcher-info">
+          <span class="server-switcher-name" id="switcher-server-name">No servers yet</span>
+          <span class="server-switcher-meta" id="switcher-server-meta">&nbsp;</span>
+        </span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="server-switcher-menu" id="server-switcher-menu" role="menu" hidden>
+        <div id="server-switcher-list"></div>
+        <div class="server-switcher-divider"></div>
+        <a class="server-switcher-manage" href="#servers" data-page="servers">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Manage servers
+        </a>
+      </div>
+    </div>
+
     <nav class="nav" aria-label="Sections">
       <a class="nav-item" href="#dashboard" data-page="dashboard" aria-current="page">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="3.5" width="7.5" height="4.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="10" width="7.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -78,6 +97,10 @@
       <a class="nav-item" href="#clients" data-page="clients">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M16 4.5c1.4.4 2.5 1.7 2.5 3.3s-1.1 2.9-2.5 3.3M19 19c0-2.5-1.6-4.3-3.7-4.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         Clients
+      </a>
+      <a class="nav-item" href="#servers" data-page="servers">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Servers
       </a>
       <a class="nav-item" href="#settings" data-page="settings">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2.3M12 18.2v2.3M20.5 12h-2.3M5.8 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -92,31 +115,23 @@
 
     <!-- ---------- DASHBOARD PAGE ---------- -->
     <section class="page" id="page-dashboard">
+      <div class="page-empty" id="dashboard-no-server" hidden>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>No server added yet.</span>
+        <p>Add your first server to start seeing live metrics, endpoints, and clients here.</p>
+        <a class="btn btn--primary" href="#servers">Add a server</a>
+      </div>
+      <div class="page-body" id="dashboard-body">
       <div class="action-bar">
         <div class="action-bar-status">
-          <span class="status-pill" id="ovpn-status-pill"><span class="status-dot" id="ovpn-status-dot" aria-hidden="true"></span><span id="ovpn-status-text">OpenVPN</span></span>
-          <span class="action-bar-version">server</span>
+          <span class="status-pill" id="agent-status-pill"><span class="status-dot status-dot--off" id="agent-status-dot" aria-hidden="true"></span><span id="agent-status-text">Checking agent&hellip;</span></span>
+          <span class="action-bar-version" id="action-bar-server-name">&nbsp;</span>
         </div>
         <div class="action-bar-group">
-          <button class="action-btn action-btn--primary" id="btn-restart">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Restart
-          </button>
-          <button class="action-btn" id="btn-stop-start">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            <span id="btn-stop-start-label">Stop</span>
-          </button>
-        </div>
-        <span class="action-bar-divider"></span>
-        <div class="action-bar-group">
-          <button class="action-btn" id="btn-logs">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5h14v15H5z" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h8M8 12.5h8M8 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            Logs
-          </button>
-          <button class="action-btn" id="btn-config">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4.5" width="16" height="15" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 9h4M8 12.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            Config
-          </button>
+          <a class="action-btn action-btn--primary" href="#endpoints">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="14" width="17" height="6" rx="1.5" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="7" r="0.9" fill="currentColor"/><circle cx="7" cy="17" r="0.9" fill="currentColor"/></svg>
+            Manage endpoints
+          </a>
         </div>
       </div>
 
@@ -209,12 +224,11 @@
       <div class="info-strip">
         <div class="info-block">
           <span class="tile-label">Uptime</span>
-          <div class="info-row"><span>OpenVPN</span><b id="info-ovpn-uptime">&mdash;</b></div>
           <div class="info-row"><span>OS</span><b id="info-os-uptime">&mdash;</b></div>
         </div>
         <div class="info-block">
-          <span class="tile-label">Panel</span>
-          <div class="info-row"><span>RAM</span><b id="info-panel-ram">&mdash;</b></div>
+          <span class="tile-label">Agent</span>
+          <div class="info-row"><span>RAM</span><b id="info-agent-ram">&mdash;</b></div>
           <div class="info-row"><span>Poll</span><b>15s</b></div>
         </div>
         <div class="info-block">
@@ -246,10 +260,18 @@
           <span class="tile-value" id="stat-data">&mdash;</span>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- ---------- ENDPOINTS PAGE ---------- -->
     <section class="page" id="page-endpoints" hidden>
+      <div class="page-empty" id="endpoints-no-server" hidden>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>No server added yet.</span>
+        <p>Add a server first, then create endpoints on it.</p>
+        <a class="btn btn--primary" href="#servers">Add a server</a>
+      </div>
+      <div class="page-body" id="endpoints-body">
       <div class="page-head">
         <h1>Endpoints</h1>
         <button class="btn btn--primary" id="open-create-endpoint">+ Create endpoint</button>
@@ -257,10 +279,18 @@
       <p class="page-sub">Each endpoint is its own independent OpenVPN listener with its own port, protocol, and cipher &mdash; add one on port 443/TCP to blend in as ordinary HTTPS, or spread clients across a few for redundancy. Every client can connect through any endpoint you create.</p>
 
       <div class="card-grid" id="endpoints-grid"></div>
+      </div>
     </section>
 
     <!-- ---------- CLIENTS PAGE ---------- -->
     <section class="page" id="page-clients" hidden>
+      <div class="page-empty" id="clients-no-server" hidden>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>No server added yet.</span>
+        <p>Add a server first, then issue client certificates on it.</p>
+        <a class="btn btn--primary" href="#servers">Add a server</a>
+      </div>
+      <div class="page-body" id="clients-body">
       <div class="page-head">
         <h1>Clients</h1>
         <button class="btn btn--primary" id="open-create-client">+ Create client</button>
@@ -273,6 +303,7 @@
             <thead>
               <tr>
                 <th scope="col">Name</th>
+                <th scope="col">Team</th>
                 <th scope="col">Status</th>
                 <th scope="col">Created</th>
                 <th scope="col">Expires</th>
@@ -292,6 +323,23 @@
           </div>
         </div>
       </section>
+      </div>
+    </section>
+
+    <!-- ---------- SERVERS PAGE ---------- -->
+    <section class="page" id="page-servers" hidden>
+      <div class="page-head">
+        <h1>Servers</h1>
+        <button class="btn btn--primary" id="open-create-server">+ Add server</button>
+      </div>
+      <p class="page-sub">Each server runs its own agent with its own PKI &mdash; a client certificate issued on one server is cryptographically meaningless on another, so no one, including the people you issue certificates to, can pick which exit IP they land on. Install the agent on any box you control and add it here.</p>
+
+      <div class="server-grid" id="servers-grid"></div>
+      <div class="page-empty" id="servers-empty" hidden>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v3M10.3 12.7 7.2 16M13.7 12.7l3.1 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>No servers yet.</span>
+        <p>Add your first server to get an install command for its agent.</p>
+      </div>
     </section>
 
     <!-- ---------- SETTINGS PAGE ---------- -->
@@ -542,11 +590,12 @@
     <label class="field">
       <span class="field-label">Cipher</span>
       <select id="ep-cipher">
-        <option value="AES-128-GCM">AES-128-GCM</option>
-        <option value="AES-256-GCM">AES-256-GCM</option>
+        <option value="AES-256-GCM" selected>AES-256-GCM (recommended)</option>
         <option value="CHACHA20-POLY1305">CHACHA20-POLY1305</option>
+        <option value="AES-128-GCM">AES-128-GCM</option>
       </select>
     </label>
+    <p class="panel-sub" style="margin:-10px 0 18px">AES-256-GCM is the strongest widely-supported option and hardware-accelerated on almost all modern CPUs. Pick CHACHA20-POLY1305 for older/ARM devices without AES-NI.</p>
     <div class="field-row">
       <label class="field">
         <span class="field-label">DNS 1</span>
@@ -557,6 +606,7 @@
         <input id="ep-dns2" type="text" value="1.0.0.1">
       </label>
     </div>
+    <p class="panel-sub" style="margin:-10px 0 18px">Defaults to Cloudflare (fast, private). Other good options: Google (8.8.8.8 / 8.8.4.4), Quad9 (9.9.9.9 / 149.112.112.112).</p>
     <p class="form-error" id="endpoint-error" role="alert" aria-live="polite" hidden></p>
     <div class="dialog-actions">
       <button type="button" class="btn btn--ghost" id="endpoint-cancel">Cancel</button>
@@ -587,6 +637,10 @@
     <label class="field">
       <span class="field-label">Name</span>
       <input id="new-client-name" type="text" placeholder="e.g. laptop-work" pattern="[A-Za-z0-9_\-]{1,32}" title="Letters, numbers, - and _ only" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Team &mdash; optional</span>
+      <input id="new-client-team" type="text" placeholder="e.g. sales">
     </label>
     <label class="field">
       <span class="field-label">Max simultaneous connections</span>
@@ -658,8 +712,39 @@
       <span class="field-label">Bandwidth cap (Mbps) &mdash; blank = unlimited</span>
       <input id="limits-bandwidth" type="number" min="0.1" step="0.1" placeholder="unlimited">
     </label>
+    <label class="field">
+      <span class="field-label">Team &mdash; optional</span>
+      <input id="limits-team" type="text" placeholder="e.g. sales">
+    </label>
     <p class="limits-usage" id="limits-usage"></p>
     <p class="form-error" id="limits-error" role="alert" aria-live="polite" hidden></p>
+
+    <div class="panel-divider"></div>
+    <div class="static-ip-block">
+      <div class="panel-head panel-head--row" style="margin-bottom:2px">
+        <span class="field-label" style="margin:0">Static IP</span>
+        <span class="pin-badge" id="limits-ip-pin-badge" hidden>Pinned</span>
+      </div>
+      <p class="panel-sub" style="margin:0 0 4px">Admin-assigned only &mdash; survives limit changes above, and is never something the client themselves can choose.</p>
+      <div class="static-ip-row">
+        <label class="field">
+          <span class="field-label">Endpoint</span>
+          <select id="limits-ip-endpoint"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">IP address</span>
+          <input id="limits-ip-address" type="text" placeholder="e.g. 10.9.0.50" autocomplete="off">
+        </label>
+      </div>
+      <div class="dialog-actions" style="justify-content:flex-start">
+        <button type="button" class="btn btn--ghost" id="limits-ip-save">
+          <span class="btn-label">Save IP</span>
+          <span class="spinner" hidden aria-hidden="true"></span>
+        </button>
+        <button type="button" class="btn btn--ghost" id="limits-ip-clear">Clear</button>
+      </div>
+      <p class="form-error" id="limits-ip-error" role="alert" aria-live="polite" hidden></p>
+    </div>
 
     <div class="panel-divider"></div>
     <p class="limits-usage" id="limits-expiry"></p>
@@ -714,7 +799,7 @@
 <!-- Logs viewer -->
 <dialog id="logs-dialog" class="dialog">
   <div class="dialog-card dialog-card--xwide">
-    <h2>OpenVPN logs <span class="dialog-sub">server &middot; last 200 lines</span></h2>
+    <h2>OpenVPN logs <span class="dialog-sub" id="logs-dialog-sub">&middot; last 200 lines</span></h2>
     <pre class="log-view" id="logs-content">Loading&hellip;</pre>
     <div class="dialog-actions">
       <button type="button" class="btn btn--ghost" id="logs-refresh">Refresh</button>
@@ -726,7 +811,7 @@
 <!-- Config viewer -->
 <dialog id="config-dialog" class="dialog">
   <div class="dialog-card dialog-card--xwide">
-    <h2>server.conf <span class="dialog-sub">read-only</span></h2>
+    <h2 id="config-dialog-title">endpoint.conf <span class="dialog-sub">read-only</span></h2>
     <pre class="log-view" id="config-content">Loading&hellip;</pre>
     <div class="dialog-actions">
       <button type="button" class="btn btn--primary" id="config-close">Close</button>
@@ -748,6 +833,96 @@
       <button type="button" class="btn btn--ghost" id="restore-cancel">Cancel</button>
       <button type="submit" class="btn btn--danger" id="restore-submit">
         <span class="btn-label">Restore &amp; restart</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add server -->
+<dialog id="server-dialog" class="dialog">
+  <form method="dialog" class="dialog-card" id="server-form">
+    <h2>Add server</h2>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="new-server-name" type="text" placeholder="e.g. de-frankfurt-1" pattern="[A-Za-z0-9_\-]{1,32}" title="Letters, numbers, - and _ only" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Label &mdash; optional</span>
+      <input id="new-server-label" type="text" placeholder="e.g. Frankfurt, Hetzner">
+    </label>
+    <label class="field">
+      <span class="field-label">VPN endpoint address</span>
+      <input id="new-server-vpn-endpoint" type="text" placeholder="e.g. vpn.example.com or a bare IP" required>
+    </label>
+    <p class="panel-sub" style="margin:-10px 0 18px">The address baked into every client's <code>.ovpn</code> for this server. A subdomain of a domain you already own works &mdash; no new domain needed.</p>
+    <p class="form-error" id="server-error" role="alert" aria-live="polite" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="server-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="server-submit">
+        <span class="btn-label">Add &amp; get install command</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- One-time install command -->
+<dialog id="install-dialog" class="dialog">
+  <div class="dialog-card">
+    <h2>Install the agent on <span id="install-server-name"></span></h2>
+    <div class="token-warning">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><path d="M12 9v4M12 16.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10.3 4.2 2.9 17a1.8 1.8 0 0 0 1.55 2.7h15.1A1.8 1.8 0 0 0 21.1 17L13.7 4.2a1.8 1.8 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>This install token is shown once. Copy the command now &mdash; if you lose it, remove this server and add it again.</span>
+    </div>
+    <p class="dialog-body" style="margin-top:0">Run this on the box you want to add. It installs the agent, which dials back to this dashboard over an outbound connection &mdash; no inbound port needed on that box.</p>
+    <div class="copy-field">
+      <code id="install-command"></code>
+      <button type="button" class="copy-field-btn" id="install-command-copy">Copy</button>
+    </div>
+    <div class="dialog-actions" style="margin-top:20px">
+      <button type="button" class="btn btn--primary" id="install-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Edit server -->
+<dialog id="server-edit-dialog" class="dialog">
+  <form method="dialog" class="dialog-card" id="server-edit-form">
+    <h2>Edit <span id="server-edit-title"></span></h2>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="server-edit-name" type="text" pattern="[A-Za-z0-9_\-]{1,32}" title="Letters, numbers, - and _ only" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Label &mdash; optional</span>
+      <input id="server-edit-label" type="text" placeholder="e.g. Frankfurt, Hetzner">
+    </label>
+    <label class="field">
+      <span class="field-label">VPN endpoint address</span>
+      <input id="server-edit-vpn-endpoint" type="text" required>
+    </label>
+    <p class="panel-sub" style="margin:-10px 0 18px">The address baked into every client's <code>.ovpn</code> for this server.</p>
+    <p class="form-error" id="server-edit-error" role="alert" aria-live="polite" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="server-edit-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="server-edit-submit">
+        <span class="btn-label">Save</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Delete server confirmation -->
+<dialog id="server-delete-dialog" class="dialog">
+  <form method="dialog" class="dialog-card">
+    <h2>Remove <span id="server-delete-target"></span>?</h2>
+    <p class="dialog-body">This removes the server from this dashboard. The agent on that box keeps running independently &mdash; its clients stay connected, but you'll no longer be able to manage it from here unless you add it again with a new install token.</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn--ghost" id="server-delete-cancel">Cancel</button>
+      <button type="button" class="btn btn--danger" id="server-delete-confirm">
+        <span class="btn-label">Remove</span>
         <span class="spinner" hidden aria-hidden="true"></span>
       </button>
     </div>

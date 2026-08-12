@@ -1,0 +1,82 @@
+# Reference example: one hub + two agents on an isolated bridge network.
+# This is what a real multi-server deployment looks like end to end — not a
+# one-shot `docker compose up` for everything, on purpose: enrollment tokens
+# are one-time and minted by the hub per-server (via the UI's Add Server
+# dialog, or POST /api/servers), so there's an inherent manual step between
+# "hub is up" and "an agent has something to dial into." That's the same
+# security property whether you're using Docker or bare metal.
+#
+# Usage:
+#   1. docker compose -f docker-compose.test.yml up -d hub
+#   2. Log in at http://localhost:8080, add "agent1" and "agent2" as servers,
+#      copy each install token.
+#   3. export AGENT1_TOKEN=... AGENT2_TOKEN=...
+#   4. docker compose -f docker-compose.test.yml up -d agent1 agent2
+#
+# Each agent needs --privileged + host-level networking capabilities for
+# real NAT/routing (see docker/agent.Dockerfile) — cap_add here is the
+# minimal set rather than full --privileged, since this is meant to be run
+# on a real box, not nested inside another container.
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: docker/hub.Dockerfile
+    container_name: ovpn-test-hub
+    networks: [ovpn-test]
+    ports:
+      - "8080:8080"
+    volumes:
+      - hub-config:/etc/ovpn-dashboard
+
+  agent1:
+    build:
+      context: .
+      dockerfile: docker/agent.Dockerfile
+    container_name: ovpn-test-agent1
+    networks: [ovpn-test]
+    depends_on: [hub]
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    security_opt:
+      - seccomp:unconfined
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      - agent1-openvpn:/etc/openvpn
+      - agent1-config:/etc/ovpn-dashboard
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    environment:
+      HUB_URL: "ws://hub:8080/agent/ws"
+      AGENT_TOKEN: "${AGENT1_TOKEN:?set AGENT1_TOKEN after creating the server in the hub UI}"
+
+  agent2:
+    build:
+      context: .
+      dockerfile: docker/agent.Dockerfile
+    container_name: ovpn-test-agent2
+    networks: [ovpn-test]
+    depends_on: [hub]
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    security_opt:
+      - seccomp:unconfined
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      - agent2-openvpn:/etc/openvpn
+      - agent2-config:/etc/ovpn-dashboard
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    environment:
+      HUB_URL: "ws://hub:8080/agent/ws"
+      AGENT_TOKEN: "${AGENT2_TOKEN:?set AGENT2_TOKEN after creating the server in the hub UI}"
+
+networks:
+  ovpn-test:
+
+volumes:
+  hub-config:
+  agent1-openvpn:
+  agent1-config:
+  agent2-openvpn:
+  agent2-config:

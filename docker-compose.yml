@@ -1,39 +1,18 @@
 services:
-  ovpn-dashboard:
-    build: .
-    container_name: openvpn-dashboard
+  hub:
+    build:
+      context: .
+      dockerfile: docker/hub.Dockerfile
+    container_name: ovpn-dashboard-hub
     restart: unless-stopped
-
-    # Host networking is what lets the container configure real NAT/routing
-    # for VPN traffic and bind the OpenVPN port directly on the host. This is
-    # standard for containerized VPN servers — bridge networking can't do
-    # transparent IP forwarding for tunneled traffic.
-    network_mode: host
-
-    # --privileged (rather than a hand-picked capability list) is what lets
-    # systemd manage cgroups cleanly as PID 1 inside the container. See the
-    # README's Docker section for a more restrictive alternative.
-    privileged: true
-    cgroup: host
-
+    ports:
+      - "8080:8080"
     volumes:
-      - ovpn-config:/etc/openvpn
-      - dashboard-config:/etc/ovpn-dashboard
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-
+      - hub-config:/etc/ovpn-dashboard
     environment:
-      # Required — this is the "remote" address baked into every client's
-      # .ovpn file. Your domain if you have one, otherwise the bare IP.
-      VPN_ENDPOINT: "vpn.example.com"
-
       # Optional — if unset, a random password is generated on first boot
       # and printed once to `docker compose logs`.
       # ADMIN_PASSWORD: "changeme"
 
-      # Optional — defaults shown.
-      # OPENVPN_PORT: "1194"
-      # OPENVPN_PROTO: "udp"
-
 volumes:
-  ovpn-config:
-  dashboard-config:
+  hub-config:

@@ -8,6 +8,11 @@ from . import db
 
 SERVER_DIR = Path("/etc/openvpn/server")
 NAME_RE = re.compile(r"^[a-z0-9-]{1,24}$")
+# Narrow wrapper the sudoers grant points at instead of a wildcard systemctl pattern —
+# some sudo implementations (e.g. sudo-rs, default on newer Ubuntu) reject wildcards
+# embedded within a single argument like openvpn-server@*. The wrapper's own name
+# validation must stay in sync with NAME_RE above.
+ENDPOINT_CTL = "/usr/local/bin/ovpn-endpoint-ctl"
 
 
 def is_port_free(port: int, protocol: str) -> bool:
@@ -96,7 +101,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
                     capture_output=True, text=True)
 
     result = subprocess.run(
-        ["sudo", "-n", "systemctl", "enable", "--now", f"openvpn-server@{name}"],
+        ["sudo", "-n", ENDPOINT_CTL, "enable-now", name],
         capture_output=True, text=True,
     )
     time.sleep(2)
@@ -106,7 +111,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
 
     if active != "active":
         conf_path.unlink(missing_ok=True)
-        subprocess.run(["sudo", "-n", "systemctl", "disable", f"openvpn-server@{name}"],
+        subprocess.run(["sudo", "-n", ENDPOINT_CTL, "disable", name],
                         capture_output=True, text=True)
         subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{port}/{protocol}"],
                         capture_output=True, text=True)
@@ -119,10 +124,8 @@ def delete_endpoint(name: str) -> None:
     row = db.get_endpoint(name)
     if not row:
         raise ValueError(f'No endpoint named "{name}".')
-    if name == "server":
-        raise ValueError('The original "server" endpoint cannot be deleted.')
 
-    subprocess.run(["sudo", "-n", "systemctl", "disable", "--now", f"openvpn-server@{name}"],
+    subprocess.run(["sudo", "-n", ENDPOINT_CTL, "disable-now", name],
                     capture_output=True, text=True)
     (SERVER_DIR / f"{name}.conf").unlink(missing_ok=True)
     subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{row['port']}/{row['protocol']}"],

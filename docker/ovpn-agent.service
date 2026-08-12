@@ -1,0 +1,20 @@
+[Unit]
+Description=ovpn-dashboard agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ovpndash
+Group=ovpndash
+WorkingDirectory=/opt/ovpn-dashboard
+EnvironmentFile=/etc/ovpn-dashboard/agent.env
+ExecStart=/opt/ovpn-dashboard/venv/bin/python3 -m agent.main
+Restart=on-failure
+RestartSec=3
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/etc/openvpn/easy-rsa /etc/openvpn/clients /etc/openvpn/ccd /etc/openvpn/server /etc/ovpn-dashboard /etc/ufw /run
+
+[Install]
+WantedBy=multi-user.target

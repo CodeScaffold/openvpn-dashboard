@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenVPN client-management dashboard
+Description=OpenVPN admin dashboard (hub)
 After=network.target
 
 [Service]
@@ -10,10 +10,9 @@ EnvironmentFile=/etc/ovpn-dashboard/config.env
 ExecStart=/opt/ovpn-dashboard/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=3
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/etc/openvpn/easy-rsa /etc/openvpn/clients /etc/openvpn/ccd /etc/openvpn/server /etc/ovpn-dashboard /etc/ufw /run
+ReadWritePaths=/etc/ovpn-dashboard
 
 [Install]
 WantedBy=multi-user.target

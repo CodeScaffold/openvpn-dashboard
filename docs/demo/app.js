@@ -14,6 +14,26 @@
   let pollTimer = null;
   let toastTimer = null;
 
+  // ---------- server context ----------
+  // Every server-scoped API call is prefixed with /api/servers/{currentServerId}.
+  // currentServerId persists across reloads via localStorage; allServers is the
+  // cached list backing both the sidebar switcher and the Servers page.
+
+  const SERVER_STORAGE_KEY = "ovpn_current_server_id";
+  let allServers = [];
+  let currentServerId = parseInt(localStorage.getItem(SERVER_STORAGE_KEY), 10) || null;
+  let currentServer = null;
+
+  function serverPath(suffix) {
+    return `/api/servers/${currentServerId}${suffix}`;
+  }
+
+  function setCurrentServer(id) {
+    currentServerId = id;
+    if (id) localStorage.setItem(SERVER_STORAGE_KEY, String(id));
+    else localStorage.removeItem(SERVER_STORAGE_KEY);
+  }
+
   // ---------- helpers ----------
 
   function showToast(message, variant = "ok") {
@@ -153,7 +173,8 @@
   // "open in new tab", middle-click, and cmd/ctrl-click natively. A left-click
   // just changes location.hash, which this hashchange listener picks up.
 
-  const PAGES = ["dashboard", "endpoints", "clients", "settings"];
+  const PAGES = ["dashboard", "endpoints", "clients", "servers", "settings"];
+  const PAGES_NEED_SERVER = new Set(["dashboard", "endpoints", "clients"]);
 
   function pageFromHash() {
     const h = location.hash.slice(1);
@@ -175,11 +196,25 @@
     refreshActivePage();
   }
 
-  function refreshActivePage() {
+  async function refreshActivePage() {
+    await refreshServers();
+
+    if (activePage === "servers") { renderServersPage(); return; }
+    if (activePage === "settings") { loadSettingsPage(); return; }
+
+    const body = document.getElementById(`${activePage}-body`);
+    const empty = document.getElementById(`${activePage}-no-server`);
+    if (PAGES_NEED_SERVER.has(activePage) && !currentServerId) {
+      if (body) body.hidden = true;
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (body) body.hidden = false;
+    if (empty) empty.hidden = true;
+
     if (activePage === "dashboard") loadDashboard();
     else if (activePage === "endpoints") loadEndpoints();
     else if (activePage === "clients") loadClients();
-    else if (activePage === "settings") loadSettingsPage();
   }
 
   // ---------- login ----------
@@ -214,6 +249,291 @@
     showLogin();
   });
 
+  // ==================== SERVER SWITCHER + SERVERS PAGE ====================
+
+  const switcherEl = document.getElementById("server-switcher");
+  const switcherBtn = document.getElementById("server-switcher-btn");
+  const switcherMenu = document.getElementById("server-switcher-menu");
+  const switcherList = document.getElementById("server-switcher-list");
+
+  function openSwitcher() {
+    switcherMenu.hidden = false;
+    switcherEl.dataset.open = "true";
+    switcherBtn.setAttribute("aria-expanded", "true");
+  }
+  function closeSwitcher() {
+    switcherMenu.hidden = true;
+    switcherEl.dataset.open = "false";
+    switcherBtn.setAttribute("aria-expanded", "false");
+  }
+  switcherBtn.addEventListener("click", () => { switcherMenu.hidden ? openSwitcher() : closeSwitcher(); });
+  document.addEventListener("click", (e) => { if (!switcherEl.contains(e.target)) closeSwitcher(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSwitcher(); });
+  document.querySelector(".server-switcher-manage").addEventListener("click", closeSwitcher);
+
+  async function refreshServers() {
+    try {
+      const res = await api("/api/servers");
+      if (!res.ok) return;
+      allServers = await res.json();
+    } catch {
+      return; // handled by api() on 401; keep last-known list otherwise
+    }
+    if (currentServerId && !allServers.some((s) => s.id === currentServerId)) {
+      setCurrentServer(null);
+    }
+    if (!currentServerId && allServers.length) {
+      setCurrentServer(allServers[0].id);
+    }
+    currentServer = allServers.find((s) => s.id === currentServerId) || null;
+    renderSwitcher();
+  }
+
+  function renderSwitcher() {
+    const dot = document.getElementById("switcher-status-dot");
+    const nameEl = document.getElementById("switcher-server-name");
+    const metaEl = document.getElementById("switcher-server-meta");
+    if (currentServer) {
+      dot.classList.toggle("status-dot--off", !currentServer.online);
+      nameEl.textContent = currentServer.vpn_endpoint || currentServer.label || currentServer.name;
+      metaEl.textContent = currentServer.online ? "Online" : "Offline";
+    } else {
+      dot.classList.add("status-dot--off");
+      nameEl.textContent = allServers.length ? "Choose a server" : "No servers yet";
+      metaEl.textContent = " ";
+    }
+
+    switcherList.innerHTML = "";
+    for (const s of allServers) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "server-switcher-item";
+      item.setAttribute("role", "menuitem");
+      if (s.id === currentServerId) item.setAttribute("aria-current", "true");
+      item.innerHTML = `
+        <span class="status-dot ${s.online ? "" : "status-dot--off"}"></span>
+        <span class="server-switcher-info">
+          <span class="server-switcher-name"></span>
+          <span class="server-switcher-meta">${s.online ? "Online" : "Offline"}</span>
+        </span>`;
+      item.querySelector(".server-switcher-name").textContent = s.vpn_endpoint || s.label || s.name;
+      item.addEventListener("click", () => {
+        closeSwitcher();
+        if (s.id !== currentServerId) {
+          setCurrentServer(s.id);
+          currentServer = s;
+          renderSwitcher();
+          refreshActivePage();
+        }
+      });
+      switcherList.appendChild(item);
+    }
+  }
+
+  const serversGrid = document.getElementById("servers-grid");
+  const serversEmpty = document.getElementById("servers-empty");
+
+  function renderServersPage() {
+    serversEmpty.hidden = allServers.length !== 0;
+    serversGrid.innerHTML = "";
+    for (const s of allServers) {
+      const card = document.createElement("div");
+      card.className = "server-card";
+      card.innerHTML = `
+        <div class="server-card-head">
+          <div>
+            <div class="server-card-name">
+              <span class="status-dot ${s.online ? "" : "status-dot--off"}"></span>
+              <span class="server-card-name-text"></span>
+            </div>
+            <div class="server-card-label"></div>
+          </div>
+          <button class="btn btn--ghost btn--icon" data-action="delete">Remove</button>
+        </div>
+        <div class="server-card-meta">
+          <div class="server-card-meta-row"><span>Status</span><b>${s.online ? "Online" : "Offline"}</b></div>
+          <div class="server-card-meta-row"><span>Agent</span><b>${s.agent_version || "—"}</b></div>
+          <div class="server-card-meta-row"><span>Hostname</span><b>${s.hostname || "—"}</b></div>
+          <div class="server-card-meta-row"><span>VPN endpoint</span><b>${s.vpn_endpoint || "—"}</b></div>
+          <div class="server-card-meta-row"><span>Last seen</span><b>${s.last_seen ? formatDate(s.last_seen) : "never"}</b></div>
+        </div>
+        <div class="server-card-actions">
+          <button class="btn btn--ghost btn--icon" data-action="edit">Edit server</button>
+          <button class="btn btn--ghost btn--icon" data-action="use">${s.id === currentServerId ? "Active" : "Switch to"}</button>
+        </div>
+      `;
+      card.querySelector(".server-card-name-text").textContent = s.name;
+      card.querySelector(".server-card-label").textContent = s.label || " ";
+      const useBtn = card.querySelector('[data-action="use"]');
+      if (s.id === currentServerId) useBtn.disabled = true;
+      useBtn.addEventListener("click", () => {
+        setCurrentServer(s.id);
+        currentServer = s;
+        renderSwitcher();
+        showToast(`Switched to "${s.label || s.name}".`);
+        renderServersPage();
+      });
+      card.querySelector('[data-action="edit"]').addEventListener("click", () => openEditServer(s));
+      card.querySelector('[data-action="delete"]').addEventListener("click", () => openDeleteServer(s));
+      serversGrid.appendChild(card);
+    }
+  }
+
+  // ---------- add server ----------
+
+  const serverDialog = document.getElementById("server-dialog");
+  const serverForm = document.getElementById("server-form");
+  const serverError = document.getElementById("server-error");
+  const serverSubmit = document.getElementById("server-submit");
+
+  document.getElementById("open-create-server").addEventListener("click", () => {
+    serverForm.reset();
+    serverError.hidden = true;
+    serverDialog.showModal();
+  });
+  document.getElementById("server-cancel").addEventListener("click", () => serverDialog.close());
+
+  serverForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    serverError.hidden = true;
+    const body = {
+      name: document.getElementById("new-server-name").value.trim(),
+      label: document.getElementById("new-server-label").value.trim(),
+      vpn_endpoint: document.getElementById("new-server-vpn-endpoint").value.trim(),
+    };
+    setBusy(serverSubmit, true);
+    try {
+      const res = await api("/api/servers", { method: "POST", body: JSON.stringify(body) });
+      const resBody = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        serverError.textContent = resBody.detail || "Couldn't add that server.";
+        serverError.hidden = false;
+        return;
+      }
+      serverDialog.close();
+      await refreshServers();
+      openInstallCommand(resBody.name, resBody.install_token);
+      renderServersPage();
+    } catch (err) {
+      if (err.message !== "Session expired") {
+        serverError.textContent = "Couldn't reach the server.";
+        serverError.hidden = false;
+      }
+    } finally {
+      setBusy(serverSubmit, false);
+    }
+  });
+
+  // ---------- one-time install command ----------
+
+  const installDialog = document.getElementById("install-dialog");
+
+  function openInstallCommand(name, token) {
+    document.getElementById("install-server-name").textContent = `"${name}"`;
+    const hubUrl = `wss://${location.host}/agent/ws`;
+    const command = `curl -fsSL https://raw.githubusercontent.com/CodeScaffold/openvpn-dashboard/main/agent/install.sh | sudo HUB_URL=${hubUrl} AGENT_TOKEN=${token} bash`;
+    document.getElementById("install-command").textContent = command;
+    installDialog.showModal();
+  }
+  document.getElementById("install-command-copy").addEventListener("click", async () => {
+    const text = document.getElementById("install-command").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Copied to clipboard.");
+    } catch {
+      showToast("Couldn't copy — select and copy manually.", "error");
+    }
+  });
+  document.getElementById("install-done").addEventListener("click", () => installDialog.close());
+
+  // ---------- edit server VPN endpoint ----------
+
+  const serverEditDialog = document.getElementById("server-edit-dialog");
+  const serverEditForm = document.getElementById("server-edit-form");
+  const serverEditError = document.getElementById("server-edit-error");
+  const serverEditSubmit = document.getElementById("server-edit-submit");
+  let pendingEditServerId = null;
+
+  function openEditServer(s) {
+    pendingEditServerId = s.id;
+    document.getElementById("server-edit-title").textContent = `"${s.label || s.name}"`;
+    document.getElementById("server-edit-name").value = s.name || "";
+    document.getElementById("server-edit-label").value = s.label || "";
+    document.getElementById("server-edit-vpn-endpoint").value = s.vpn_endpoint || "";
+    serverEditError.hidden = true;
+    serverEditDialog.showModal();
+  }
+  document.getElementById("server-edit-cancel").addEventListener("click", () => serverEditDialog.close());
+
+  serverEditForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!pendingEditServerId) return;
+    serverEditError.hidden = true;
+    const name = document.getElementById("server-edit-name").value.trim();
+    const label = document.getElementById("server-edit-label").value.trim();
+    const vpnEndpoint = document.getElementById("server-edit-vpn-endpoint").value.trim();
+    setBusy(serverEditSubmit, true);
+    try {
+      const res = await api(`/api/servers/${pendingEditServerId}`, {
+        method: "PUT", body: JSON.stringify({ name, label, vpn_endpoint: vpnEndpoint }),
+      });
+      const resBody = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        serverEditError.textContent = resBody.detail || "Couldn't save.";
+        serverEditError.hidden = false;
+        return;
+      }
+      serverEditDialog.close();
+      showToast("Server updated.");
+      await refreshServers();
+      renderServersPage();
+    } catch (err) {
+      if (err.message !== "Session expired") {
+        serverEditError.textContent = "Couldn't reach the server.";
+        serverEditError.hidden = false;
+      }
+    } finally {
+      setBusy(serverEditSubmit, false);
+    }
+  });
+
+  // ---------- delete server ----------
+
+  const serverDeleteDialog = document.getElementById("server-delete-dialog");
+  const serverDeleteTarget = document.getElementById("server-delete-target");
+  const serverDeleteConfirm = document.getElementById("server-delete-confirm");
+  let pendingDeleteServerId = null;
+
+  function openDeleteServer(s) {
+    pendingDeleteServerId = s.id;
+    serverDeleteTarget.textContent = `"${s.label || s.name}"`;
+    serverDeleteDialog.showModal();
+  }
+  document.getElementById("server-delete-cancel").addEventListener("click", () => serverDeleteDialog.close());
+  serverDeleteDialog.addEventListener("close", () => { pendingDeleteServerId = null; });
+
+  serverDeleteConfirm.addEventListener("click", async () => {
+    if (!pendingDeleteServerId) return;
+    const id = pendingDeleteServerId;
+    setBusy(serverDeleteConfirm, true);
+    try {
+      const res = await api(`/api/servers/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.detail || "Couldn't remove that server.", "error");
+      } else {
+        showToast("Server removed.");
+        if (id === currentServerId) setCurrentServer(null);
+        await refreshServers();
+        renderServersPage();
+      }
+    } catch { /* handled by api() */ }
+    finally {
+      setBusy(serverDeleteConfirm, false);
+      serverDeleteDialog.close();
+    }
+  });
+
   // ==================== DASHBOARD PAGE ====================
 
   const WARN_PCT = 75;
@@ -221,15 +541,48 @@
   let ipVisible = false;
   let lastSys = null;
 
+  // The /system route returns {online, latest, history, vpn_endpoint} — latest and each
+  // history point carry the agent's raw telemetry fields. This reshapes that into the
+  // flat per-metric-history shape the chart renderers below were already written for.
+  function adaptSystemPayload(payload) {
+    const history = payload.history || [];
+    const latest = payload.latest || (history.length ? history[history.length - 1] : null) || {};
+    // "latest" has two possible shapes: the agent's raw live snapshot (memory/swap/disk
+    // nested as {used, total}) when online, or a persisted metrics-table row (flat
+    // mem_used/mem_total/... columns) when falling back to history while offline.
+    // cpu_percent is flat in both, which is why only CPU rendered correctly before this fix.
+    const mem = latest.memory || { used: latest.mem_used || 0, total: latest.mem_total || 0 };
+    const swap = latest.swap || { used: latest.swap_used || 0, total: latest.swap_total || 0 };
+    const disk = latest.disk || { used: latest.disk_used || 0, total: latest.disk_total || 0 };
+    return {
+      online: payload.online,
+      vpn_endpoint: payload.vpn_endpoint,
+      cpu_percent: latest.cpu_percent || 0,
+      memory: mem,
+      swap,
+      disk,
+      net_totals: latest.net_totals || { rx: 0, tx: 0 },
+      uptime_seconds: latest.uptime_seconds || 0,
+      process_mem_bytes: latest.process_mem_bytes || 0,
+      network_history: history.map((h) => ({ t: h.t, rx_bps: h.net_rx_bps || 0, tx_bps: h.net_tx_bps || 0 })),
+      cpu_history: history.map((h) => ({ t: h.t, v: h.cpu_percent || 0 })),
+      mem_history: history.map((h) => ({ t: h.t, v: h.mem_total ? (h.mem_used / h.mem_total) * 100 : 0 })),
+      swap_history: history.map((h) => ({ t: h.t, v: h.swap_total ? (h.swap_used / h.swap_total) * 100 : 0 })),
+      disk_history: history.map((h) => ({ t: h.t, v: h.disk_total ? (h.disk_used / h.disk_total) * 100 : 0 })),
+      conn_history: history.map((h) => ({ t: h.t, tcp: h.tcp_count || 0, udp: h.udp_count || 0 })),
+    };
+  }
+
   async function loadDashboard() {
     try {
       const [sysRes, clientsRes, statusRes, endpointsRes] = await Promise.all([
-        api("/api/system"), api("/api/clients"), api("/api/status"), api("/api/endpoints"),
+        api(serverPath("/system")), api(serverPath("/clients")), api(serverPath("/status")), api(serverPath("/endpoints")),
       ]);
       if (!sysRes.ok || !clientsRes.ok || !statusRes.ok || !endpointsRes.ok) return;
-      const [sys, clients, sessions, eps] = await Promise.all([
+      const [sysRaw, clients, sessions, eps] = await Promise.all([
         sysRes.json(), clientsRes.json(), statusRes.json(), endpointsRes.json(),
       ]);
+      const sys = adaptSystemPayload(sysRaw);
       lastSys = sys;
       renderMetrics(sys);
       renderHealthBanner(sys);
@@ -237,9 +590,7 @@
       renderConnectionsChart(sys.conn_history);
       renderInfoStrip(sys);
       renderChartFooters(sys, sessions);
-
-      const serverEp = eps.find((e) => e.name === "server");
-      if (serverEp) renderActionBarStatus(serverEp);
+      renderAgentStatus(sys);
 
       document.getElementById("stat-endpoints").textContent = eps.length;
       document.getElementById("stat-clients").textContent = clients.length;
@@ -263,15 +614,12 @@
     document.getElementById("foot-open-sessions").textContent = String(sessions.length);
   }
 
-  let serverIsActive = null;
-
-  function renderActionBarStatus(ep) {
-    serverIsActive = ep.active;
-    const dot = document.getElementById("ovpn-status-dot");
-    const text = document.getElementById("ovpn-status-text");
-    dot.classList.toggle("status-dot--off", !ep.active);
-    text.textContent = ep.active ? "OpenVPN · Active" : "OpenVPN · Stopped";
-    document.getElementById("btn-stop-start-label").textContent = ep.active ? "Stop" : "Start";
+  function renderAgentStatus(sys) {
+    const dot = document.getElementById("agent-status-dot");
+    const text = document.getElementById("agent-status-text");
+    dot.classList.toggle("status-dot--off", !sys.online);
+    text.textContent = sys.online ? "Agent · Connected" : "Agent · Offline";
+    document.getElementById("action-bar-server-name").textContent = currentServer ? (currentServer.vpn_endpoint || currentServer.label || currentServer.name) : "";
   }
 
   function seriesMean(history, key) {
@@ -492,11 +840,10 @@
   }
 
   function renderInfoStrip(sys) {
-    document.getElementById("info-ovpn-uptime").textContent = formatUptime(sys.openvpn_uptime_seconds);
     document.getElementById("info-os-uptime").textContent = formatUptime(sys.uptime_seconds);
-    document.getElementById("info-panel-ram").textContent = formatBytes(sys.process_mem_bytes);
+    document.getElementById("info-agent-ram").textContent = formatBytes(sys.process_mem_bytes);
     document.getElementById("info-ip").textContent = ipVisible
-      ? sys.vpn_endpoint
+      ? (sys.vpn_endpoint || "—")
       : "•••.•••.•••.•••";
   }
 
@@ -504,73 +851,8 @@
     ipVisible = !ipVisible;
     const el = document.getElementById("info-ip");
     el.classList.toggle("ip-visible", ipVisible);
-    if (lastSys) el.textContent = ipVisible ? lastSys.vpn_endpoint : "•••.•••.•••.•••";
+    if (lastSys) el.textContent = ipVisible ? (lastSys.vpn_endpoint || "—") : "•••.•••.•••.•••";
   });
-
-  // ---------- action bar ----------
-
-  const btnRestart = document.getElementById("btn-restart");
-  const btnStopStart = document.getElementById("btn-stop-start");
-
-  btnRestart.addEventListener("click", async () => {
-    setBusy(btnRestart, true);
-    try {
-      const res = await api("/api/endpoints/server/restart", { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(body.detail || "Restart failed.", "error"); return; }
-      showToast("OpenVPN restarted.");
-      loadDashboard();
-    } catch { /* handled by api() */ }
-    finally { setBusy(btnRestart, false); }
-  });
-
-  btnStopStart.addEventListener("click", async () => {
-    const action = serverIsActive ? "stop" : "start";
-    btnStopStart.disabled = true;
-    try {
-      const res = await api(`/api/endpoints/server/${action}`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(body.detail || `${action} failed.`, "error"); return; }
-      showToast(action === "stop" ? "OpenVPN stopped." : "OpenVPN started.");
-      loadDashboard();
-    } catch { /* handled by api() */ }
-    finally { btnStopStart.disabled = false; }
-  });
-
-  const logsDialog = document.getElementById("logs-dialog");
-  const logsContent = document.getElementById("logs-content");
-
-  async function openLogs() {
-    logsDialog.showModal();
-    logsContent.textContent = "Loading…";
-    try {
-      const res = await api("/api/endpoints/server/logs");
-      const body = await res.json().catch(() => ({}));
-      logsContent.textContent = res.ok ? (body.logs || "(empty)") : (body.detail || "Couldn't load logs.");
-      logsContent.scrollTop = logsContent.scrollHeight;
-    } catch {
-      logsContent.textContent = "Couldn't reach the server.";
-    }
-  }
-  document.getElementById("btn-logs").addEventListener("click", openLogs);
-  document.getElementById("logs-refresh").addEventListener("click", openLogs);
-  document.getElementById("logs-close").addEventListener("click", () => logsDialog.close());
-
-  const configDialog = document.getElementById("config-dialog");
-  const configContent = document.getElementById("config-content");
-
-  document.getElementById("btn-config").addEventListener("click", async () => {
-    configDialog.showModal();
-    configContent.textContent = "Loading…";
-    try {
-      const res = await api("/api/endpoints/server/config");
-      const body = await res.json().catch(() => ({}));
-      configContent.textContent = res.ok ? body.config : (body.detail || "Couldn't load config.");
-    } catch {
-      configContent.textContent = "Couldn't reach the server.";
-    }
-  });
-  document.getElementById("config-close").addEventListener("click", () => configDialog.close());
 
   // ==================== ENDPOINTS PAGE ====================
 
@@ -586,7 +868,7 @@
 
   async function loadEndpoints() {
     try {
-      const res = await api("/api/endpoints");
+      const res = await api(serverPath("/endpoints"));
       if (!res.ok) return;
       renderEndpoints(await res.json());
     } catch { /* handled by api() on 401 */ }
@@ -606,18 +888,90 @@
             </div>
             <div class="ep-card-meta">${ep.protocol.toUpperCase()} &middot; ${ep.port} &middot; ${ep.cipher}</div>
           </div>
-          ${ep.name === "server" ? "" : '<button class="btn btn--ghost btn--icon" data-action="delete">Delete</button>'}
+          <button class="btn btn--ghost btn--icon" data-action="delete">Delete</button>
         </div>
         <div class="ep-card-stats">
           <div><span class="ep-card-stat-label">Online</span><span class="ep-card-stat-value">${ep.online}</span></div>
           <div><span class="ep-card-stat-label">Status</span><span class="ep-card-stat-value">${ep.active ? "Active" : "Stopped"}</span></div>
         </div>
+        <div class="ep-card-actions" style="justify-content:flex-start;flex-wrap:wrap">
+          <button class="btn btn--ghost btn--icon" data-action="restart">Restart</button>
+          <button class="btn btn--ghost btn--icon" data-action="toggle">${ep.active ? "Stop" : "Start"}</button>
+          <button class="btn btn--ghost btn--icon" data-action="logs">Logs</button>
+          <button class="btn btn--ghost btn--icon" data-action="config">Config</button>
+        </div>
       `;
-      const delBtn = card.querySelector('[data-action="delete"]');
-      if (delBtn) delBtn.addEventListener("click", () => openDeleteEndpoint(ep.name));
+      card.querySelector('[data-action="delete"]').addEventListener("click", () => openDeleteEndpoint(ep.name));
+      card.querySelector('[data-action="restart"]').addEventListener("click", (e) => restartEndpoint(ep.name, e.currentTarget));
+      card.querySelector('[data-action="toggle"]').addEventListener("click", (e) => toggleEndpoint(ep, e.currentTarget));
+      card.querySelector('[data-action="logs"]').addEventListener("click", () => openEndpointLogs(ep.name));
+      card.querySelector('[data-action="config"]').addEventListener("click", () => openEndpointConfig(ep.name));
       endpointsGrid.appendChild(card);
     }
   }
+
+  async function restartEndpoint(name, btn) {
+    btn.disabled = true;
+    try {
+      const res = await api(serverPath(`/endpoints/${encodeURIComponent(name)}/restart`), { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.detail || "Restart failed.", "error"); return; }
+      showToast(`"${name}" restarted.`);
+      loadEndpoints();
+    } catch { /* handled by api() */ }
+    finally { btn.disabled = false; }
+  }
+
+  async function toggleEndpoint(ep, btn) {
+    const action = ep.active ? "stop" : "start";
+    btn.disabled = true;
+    try {
+      const res = await api(serverPath(`/endpoints/${encodeURIComponent(ep.name)}/${action}`), { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.detail || `${action} failed.`, "error"); return; }
+      showToast(action === "stop" ? `"${ep.name}" stopped.` : `"${ep.name}" started.`);
+      loadEndpoints();
+    } catch { /* handled by api() */ }
+    finally { btn.disabled = false; }
+  }
+
+  const logsDialog = document.getElementById("logs-dialog");
+  const logsContent = document.getElementById("logs-content");
+  let pendingLogsEndpoint = null;
+
+  async function openEndpointLogs(name) {
+    pendingLogsEndpoint = name;
+    document.getElementById("logs-dialog-sub").textContent = `${name} · last 200 lines`;
+    logsDialog.showModal();
+    logsContent.textContent = "Loading…";
+    try {
+      const res = await api(serverPath(`/endpoints/${encodeURIComponent(name)}/logs`));
+      const body = await res.json().catch(() => ({}));
+      logsContent.textContent = res.ok ? (body.logs || "(empty)") : (body.detail || "Couldn't load logs.");
+      logsContent.scrollTop = logsContent.scrollHeight;
+    } catch {
+      logsContent.textContent = "Couldn't reach the server.";
+    }
+  }
+  document.getElementById("logs-refresh").addEventListener("click", () => { if (pendingLogsEndpoint) openEndpointLogs(pendingLogsEndpoint); });
+  document.getElementById("logs-close").addEventListener("click", () => logsDialog.close());
+
+  const configDialog = document.getElementById("config-dialog");
+  const configContent = document.getElementById("config-content");
+
+  async function openEndpointConfig(name) {
+    document.getElementById("config-dialog-title").innerHTML = `${name}.conf <span class="dialog-sub">read-only</span>`;
+    configDialog.showModal();
+    configContent.textContent = "Loading…";
+    try {
+      const res = await api(serverPath(`/endpoints/${encodeURIComponent(name)}/config`));
+      const body = await res.json().catch(() => ({}));
+      configContent.textContent = res.ok ? body.config : (body.detail || "Couldn't load config.");
+    } catch {
+      configContent.textContent = "Couldn't reach the server.";
+    }
+  }
+  document.getElementById("config-close").addEventListener("click", () => configDialog.close());
 
   document.getElementById("open-create-endpoint").addEventListener("click", () => {
     endpointForm.reset();
@@ -642,7 +996,7 @@
     };
     setBusy(endpointSubmit, true);
     try {
-      const res = await api("/api/endpoints", { method: "POST", body: JSON.stringify(body) });
+      const res = await api(serverPath("/endpoints"), { method: "POST", body: JSON.stringify(body) });
       const resBody = await res.json().catch(() => ({}));
       if (!res.ok) {
         endpointError.textContent = resBody.detail || "Couldn't create endpoint.";
@@ -674,7 +1028,7 @@
     if (!pendingDeleteEndpoint) return;
     const name = pendingDeleteEndpoint;
     try {
-      const res = await api(`/api/endpoints/${encodeURIComponent(name)}`, { method: "DELETE" });
+      const res = await api(serverPath(`/endpoints/${encodeURIComponent(name)}`), { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         showToast(body.detail || `Couldn't delete "${name}".`, "error");
@@ -708,6 +1062,7 @@
   const limitsMaxConn = document.getElementById("limits-max-connections");
   const limitsQuota = document.getElementById("limits-quota");
   const limitsBandwidth = document.getElementById("limits-bandwidth");
+  const limitsTeam = document.getElementById("limits-team");
   const limitsUsage = document.getElementById("limits-usage");
   const limitsError = document.getElementById("limits-error");
   const limitsCancel = document.getElementById("limits-cancel");
@@ -716,7 +1071,14 @@
   const limitsExpiry = document.getElementById("limits-expiry");
   const limitsRenew = document.getElementById("limits-renew");
   const limitsRenewError = document.getElementById("limits-renew-error");
-  let pendingLimitsName = null;
+  const limitsIpEndpoint = document.getElementById("limits-ip-endpoint");
+  const limitsIpAddress = document.getElementById("limits-ip-address");
+  const limitsIpPinBadge = document.getElementById("limits-ip-pin-badge");
+  const limitsIpError = document.getElementById("limits-ip-error");
+  const limitsIpSave = document.getElementById("limits-ip-save");
+  const limitsIpClear = document.getElementById("limits-ip-clear");
+  let pendingLimitsClient = null;
+  let limitsEndpoints = [];
 
   const downloadDialog = document.getElementById("download-dialog");
   const downloadTarget = document.getElementById("download-target");
@@ -727,7 +1089,7 @@
 
   async function loadClients() {
     try {
-      const [clientsRes, statusRes] = await Promise.all([api("/api/clients"), api("/api/status")]);
+      const [clientsRes, statusRes] = await Promise.all([api(serverPath("/clients")), api(serverPath("/status"))]);
       if (!clientsRes.ok) return;
       const clients = await clientsRes.json();
       onlineNames = new Set(statusRes.ok ? (await statusRes.json()).map((s) => s.name) : []);
@@ -738,7 +1100,7 @@
   function limitsSummary(c) {
     const parts = [];
     parts.push(`${c.max_connections} device${c.max_connections === 1 ? "" : "s"}`);
-    parts.push(c.quota_bytes ? `${formatBytes(c.used_bytes)} / ${formatBytes(c.quota_bytes)}` : "no data cap");
+    parts.push(c.quota_bytes ? `${formatBytes(c.used_bytes)} / ${formatBytes(c.quota_bytes)}` : `${formatBytes(c.used_bytes)} used`);
     parts.push(c.bandwidth_kbps ? `${(c.bandwidth_kbps / 1000).toFixed(1)} Mbps cap` : "no speed cap");
     return parts.join(" · ");
   }
@@ -755,6 +1117,15 @@
       nameTd.innerHTML = `<span class="client-name"></span>${c.disabled ? '<span class="badge-disabled">quota exceeded</span>' : ""}`;
       nameTd.querySelector(".client-name").textContent = c.name;
       tr.appendChild(nameTd);
+
+      const teamTd = document.createElement("td");
+      if (c.team) {
+        teamTd.innerHTML = `<span class="team-badge"></span>`;
+        teamTd.querySelector(".team-badge").textContent = c.team;
+      } else {
+        teamTd.textContent = "—";
+      }
+      tr.appendChild(teamTd);
 
       const statusTd = document.createElement("td");
       statusTd.innerHTML = `<span class="status-pill"><span class="status-dot ${online ? "" : "status-dot--off"}"></span>${online ? "Online" : "Offline"}</span>`;
@@ -804,11 +1175,11 @@
     downloadList.innerHTML = '<p class="chart-empty">Loading endpoints&hellip;</p>';
     downloadDialog.showModal();
     try {
-      const res = await api("/api/endpoints");
+      const res = await api(serverPath("/endpoints"));
       const eps = res.ok ? await res.json() : [];
       if (eps.length <= 1) {
         downloadDialog.close();
-        window.location.href = `/api/clients/${encodeURIComponent(name)}/download?endpoint=${encodeURIComponent(eps[0]?.name || "server")}`;
+        window.location.href = serverPath(`/clients/${encodeURIComponent(name)}/download?endpoint=${encodeURIComponent(eps[0]?.name || "server")}`);
         return;
       }
       downloadList.innerHTML = "";
@@ -818,7 +1189,7 @@
         item.innerHTML = `<span>${ep.name}</span><span class="download-item-meta">${ep.protocol.toUpperCase()} &middot; ${ep.port}</span>`;
         item.addEventListener("click", () => {
           downloadDialog.close();
-          window.location.href = `/api/clients/${encodeURIComponent(name)}/download?endpoint=${encodeURIComponent(ep.name)}`;
+          window.location.href = serverPath(`/clients/${encodeURIComponent(name)}/download?endpoint=${encodeURIComponent(ep.name)}`);
         });
         downloadList.appendChild(item);
       }
@@ -853,6 +1224,7 @@
     const name = document.getElementById("new-client-name").value.trim();
     const body = {
       name,
+      team: document.getElementById("new-client-team").value.trim() || null,
       max_connections: parseInt(document.getElementById("new-client-max-conn").value, 10) || 1,
       quota_gb: document.getElementById("new-client-quota").value ? parseFloat(document.getElementById("new-client-quota").value) : null,
       bandwidth_mbps: document.getElementById("new-client-bandwidth").value ? parseFloat(document.getElementById("new-client-bandwidth").value) : null,
@@ -860,7 +1232,7 @@
     };
     setBusy(clientSubmit, true);
     try {
-      const res = await api("/api/clients", { method: "POST", body: JSON.stringify(body) });
+      const res = await api(serverPath("/clients"), { method: "POST", body: JSON.stringify(body) });
       const resBody = await res.json().catch(() => ({}));
       if (!res.ok) {
         clientError.textContent = resBody.detail || "Couldn't create that client.";
@@ -868,9 +1240,9 @@
         return;
       }
       clientDialog.close();
-      showToast(`Created "${name}" — downloading config…`);
+      showToast(`Created "${name}".`);
       loadClients();
-      window.location.href = `/api/clients/${encodeURIComponent(name)}/download?endpoint=server`;
+      openDownload(name);
     } catch (err) {
       if (err.message !== "Session expired") {
         clientError.textContent = "Couldn't reach the server.";
@@ -896,7 +1268,7 @@
     const name = pendingRevokeName;
     setBusy(revokeConfirm, true);
     try {
-      const res = await api(`/api/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}`), { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         showToast(body.detail || `Couldn't revoke "${name}".`, "error");
@@ -913,12 +1285,13 @@
 
   // ---------- limits ----------
 
-  function openLimits(client) {
-    pendingLimitsName = client.name;
+  async function openLimits(client) {
+    pendingLimitsClient = client;
     limitsTarget.textContent = `"${client.name}"`;
     limitsMaxConn.value = client.max_connections;
     limitsQuota.value = client.quota_bytes ? (client.quota_bytes / 1_000_000_000).toString() : "";
     limitsBandwidth.value = client.bandwidth_kbps ? (client.bandwidth_kbps / 1000).toString() : "";
+    limitsTeam.value = client.team || "";
     limitsUsage.textContent = client.quota_bytes
       ? `Used so far: ${formatBytes(client.used_bytes)} of ${formatBytes(client.quota_bytes)}${client.disabled ? " — currently blocked (quota exceeded)" : ""}`
       : `Used so far: ${formatBytes(client.used_bytes)} (no cap set)`;
@@ -926,24 +1299,49 @@
     limitsExpiry.textContent = client.expires ? `Certificate expires: ${formatDate(client.expires)}` : "Certificate expiry unknown.";
     daysToPresetSelection("limits-validity-preset", "limits-validity-until-wrap", "limits-validity-until", 365);
     limitsRenewError.hidden = true;
+    limitsIpError.hidden = true;
+
+    limitsIpEndpoint.innerHTML = '<option value="">Loading&hellip;</option>';
     limitsDialog.showModal();
+    try {
+      const res = await api(serverPath("/endpoints"));
+      limitsEndpoints = res.ok ? await res.json() : [];
+    } catch { limitsEndpoints = []; }
+    limitsIpEndpoint.innerHTML = "";
+    for (const ep of limitsEndpoints) {
+      const opt = document.createElement("option");
+      opt.value = ep.name;
+      opt.textContent = ep.name;
+      limitsIpEndpoint.appendChild(opt);
+    }
+    renderLimitsIp();
   }
+
+  function renderLimitsIp() {
+    const ep = limitsIpEndpoint.value;
+    const entry = pendingLimitsClient && pendingLimitsClient.static_ips ? pendingLimitsClient.static_ips[ep] : null;
+    limitsIpAddress.value = entry ? entry.static_ip : "";
+    limitsIpPinBadge.hidden = !(entry && entry.pinned);
+  }
+  limitsIpEndpoint.addEventListener("change", renderLimitsIp);
+
   limitsCancel.addEventListener("click", () => limitsDialog.close());
-  limitsDialog.addEventListener("close", () => { pendingLimitsName = null; });
+  limitsDialog.addEventListener("close", () => { pendingLimitsClient = null; });
 
   limitsForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!pendingLimitsName) return;
+    if (!pendingLimitsClient) return;
     limitsError.hidden = true;
-    const name = pendingLimitsName;
+    const name = pendingLimitsClient.name;
     const body = {
       max_connections: parseInt(limitsMaxConn.value, 10) || 1,
       quota_gb: limitsQuota.value ? parseFloat(limitsQuota.value) : null,
       bandwidth_mbps: limitsBandwidth.value ? parseFloat(limitsBandwidth.value) : null,
+      team: limitsTeam.value.trim() || null,
     };
     setBusy(limitsSubmit, true);
     try {
-      const res = await api(`/api/clients/${encodeURIComponent(name)}/limits`, { method: "PUT", body: JSON.stringify(body) });
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}/limits`), { method: "PUT", body: JSON.stringify(body) });
       const resBody = await res.json().catch(() => ({}));
       if (!res.ok) {
         limitsError.textContent = resBody.detail || "Couldn't save limits.";
@@ -964,10 +1362,10 @@
   });
 
   limitsResetUsage.addEventListener("click", async () => {
-    if (!pendingLimitsName) return;
-    const name = pendingLimitsName;
+    if (!pendingLimitsClient) return;
+    const name = pendingLimitsClient.name;
     try {
-      const res = await api(`/api/clients/${encodeURIComponent(name)}/reset-usage`, { method: "POST" });
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}/reset-usage`), { method: "POST" });
       if (!res.ok) { showToast("Couldn't reset usage.", "error"); return; }
       showToast(`Usage reset for "${name}".`);
       limitsDialog.close();
@@ -976,13 +1374,13 @@
   });
 
   limitsRenew.addEventListener("click", async () => {
-    if (!pendingLimitsName) return;
-    const name = pendingLimitsName;
+    if (!pendingLimitsClient) return;
+    const name = pendingLimitsClient.name;
     limitsRenewError.hidden = true;
     const body = { validity_days: presetToDays("limits-validity-preset", "limits-validity-until") };
     setBusy(limitsRenew, true);
     try {
-      const res = await api(`/api/clients/${encodeURIComponent(name)}/renew`, { method: "POST", body: JSON.stringify(body) });
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}/renew`), { method: "POST", body: JSON.stringify(body) });
       const resBody = await res.json().catch(() => ({}));
       if (!res.ok) {
         limitsRenewError.textContent = resBody.detail || "Couldn't renew certificate.";
@@ -990,9 +1388,10 @@
         return;
       }
       limitsExpiry.textContent = resBody.expires ? `Certificate expires: ${formatDate(resBody.expires)}` : "";
-      showToast(`Renewed "${name}" — the old profile stopped working, downloading the new one…`);
+      showToast(`Renewed "${name}" — the old profile stopped working.`);
       loadClients();
-      window.location.href = `/api/clients/${encodeURIComponent(name)}/download?endpoint=server`;
+      limitsDialog.close();
+      openDownload(name);
     } catch (err) {
       if (err.message !== "Session expired") {
         limitsRenewError.textContent = "Couldn't reach the server.";
@@ -1001,6 +1400,62 @@
     } finally {
       setBusy(limitsRenew, false);
     }
+  });
+
+  // ---------- static IP (admin-only pin — never a user choice) ----------
+
+  limitsIpSave.addEventListener("click", async () => {
+    if (!pendingLimitsClient || !limitsIpEndpoint.value) return;
+    const name = pendingLimitsClient.name;
+    const endpoint = limitsIpEndpoint.value;
+    const ip = limitsIpAddress.value.trim();
+    if (!ip) { limitsIpError.textContent = "Enter an IP address, or use Clear to remove one."; limitsIpError.hidden = false; return; }
+    limitsIpError.hidden = true;
+    setBusy(limitsIpSave, true);
+    try {
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}/static-ip`), {
+        method: "PUT", body: JSON.stringify({ endpoint, static_ip: ip }),
+      });
+      const resBody = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        limitsIpError.textContent = resBody.detail || "Couldn't save that IP.";
+        limitsIpError.hidden = false;
+        return;
+      }
+      pendingLimitsClient = resBody;
+      renderLimitsIp();
+      showToast(`Pinned "${name}" to ${ip} on ${endpoint}.`);
+      loadClients();
+    } catch (err) {
+      if (err.message !== "Session expired") {
+        limitsIpError.textContent = "Couldn't reach the server.";
+        limitsIpError.hidden = false;
+      }
+    } finally {
+      setBusy(limitsIpSave, false);
+    }
+  });
+
+  limitsIpClear.addEventListener("click", async () => {
+    if (!pendingLimitsClient || !limitsIpEndpoint.value) return;
+    const name = pendingLimitsClient.name;
+    const endpoint = limitsIpEndpoint.value;
+    limitsIpError.hidden = true;
+    try {
+      const res = await api(serverPath(`/clients/${encodeURIComponent(name)}/static-ip`), {
+        method: "PUT", body: JSON.stringify({ endpoint, static_ip: null }),
+      });
+      const resBody = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        limitsIpError.textContent = resBody.detail || "Couldn't clear that IP.";
+        limitsIpError.hidden = false;
+        return;
+      }
+      pendingLimitsClient = resBody;
+      renderLimitsIp();
+      showToast(`Cleared the static IP for "${name}" on ${endpoint}.`);
+      loadClients();
+    } catch { /* handled by api() */ }
   });
 
   // ==================== SETTINGS PAGE ====================
@@ -1251,9 +1706,7 @@
         return;
       }
       restoreDialog.close();
-      showToast("Restore complete — panel is restarting…");
-      stopPolling();
-      setTimeout(() => window.location.reload(), 3000);
+      showToast("Dashboard settings restored.");
     } catch {
       restoreError.textContent = "Couldn't reach the server.";
       restoreError.hidden = false;
@@ -1305,7 +1758,7 @@
 
   (async function init() {
     try {
-      const res = await fetch("/api/clients", { credentials: "same-origin" });
+      const res = await fetch("/api/servers", { credentials: "same-origin" });
       if (res.ok) showDashboard(); else showLogin();
     } catch { showLogin(); }
   })();

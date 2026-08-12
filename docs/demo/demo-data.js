@@ -3,63 +3,99 @@
 // build step — this is what makes a live demo possible as a static GitHub
 // Pages site. Load this BEFORE app.js.
 //
-// Root-relative fetch() calls like fetch("/api/clients") are intercepted
+// Root-relative fetch() calls like fetch("/api/servers") are intercepted
 // here regardless of what subpath this page itself is served from, because
 // we replace window.fetch before app.js ever calls it — the browser never
 // sees a real HTTP request. The two places app.js triggers a real page
 // navigation instead of a fetch (downloading a .ovpn file) can't be mocked
-// this way; see the click-guard at the bottom.
+// this way; see the click-guard at the bottom. Demo data always has 2+
+// endpoints per server so app.js's "auto-navigate when there's only one
+// endpoint" shortcut never fires — every download goes through the picker
+// dialog, which IS click-guardable.
 (() => {
   "use strict";
 
   const now = () => Date.now() / 1000;
   const GB = 1_000_000_000;
 
-  // ---------- mutable demo state ----------
+  function daysAgo(n) { return now() - n * 86400; }
+  function daysFromNow(n) { return now() + n * 86400; }
+  function iso(unixSeconds) { return new Date(unixSeconds * 1000).toISOString(); }
+
+  // ---------- mutable demo state — two servers, one online, one not ----------
+  // Independent PKI per server is the whole point of the real product, so
+  // each server gets its own client/endpoint lists here too.
 
   const state = {
-    clients: [
+    servers: [
       {
-        name: "alice-phone", created: iso(daysAgo(41)), expires: iso(daysFromNow(324)),
-        max_connections: 2, quota_bytes: 5 * GB, used_bytes: 3.1 * GB,
-        bandwidth_kbps: null, disabled: false, online: true,
+        id: 1, name: "de-frankfurt-1", label: "Frankfurt", online: true,
+        agent_version: "1.0.0", hostname: "vpn-fra-1", public_addr: "203.0.113.5",
+        vpn_endpoint: "vpn.example.com", last_seen: iso(now()), created: iso(daysAgo(120)),
       },
       {
-        name: "bob-laptop", created: iso(daysAgo(19)), expires: iso(daysFromNow(346)),
-        max_connections: 1, quota_bytes: null, used_bytes: 41.7 * GB,
-        bandwidth_kbps: 20000, disabled: false, online: false,
-      },
-      {
-        name: "work-desktop", created: iso(daysAgo(6)), expires: iso(daysFromNow(359)),
-        max_connections: 1, quota_bytes: null, used_bytes: 2.4 * GB,
-        bandwidth_kbps: null, disabled: false, online: true,
-      },
-      {
-        name: "guest-tablet", created: iso(daysAgo(88)), expires: iso(daysFromNow(2)),
-        max_connections: 1, quota_bytes: 2 * GB, used_bytes: 2 * GB,
-        bandwidth_kbps: null, disabled: true, online: false,
+        id: 2, name: "us-newyork-1", label: "New York", online: false,
+        agent_version: "1.0.0", hostname: "vpn-nyc-1", public_addr: "198.51.100.9",
+        vpn_endpoint: "vpn2.example.com", last_seen: iso(daysAgo(2)), created: iso(daysAgo(60)),
       },
     ],
-    endpoints: [
-      { name: "server", port: 1194, protocol: "udp", cipher: "AES-128-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(120)) },
-      { name: "stealth-443", port: 443, protocol: "tcp", cipher: "CHACHA20-POLY1305", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(30)) },
-    ],
+    clientsByServer: {
+      1: [
+        {
+          name: "alice-phone", team: "sales", created: iso(daysAgo(41)), expires: iso(daysFromNow(324)),
+          max_connections: 2, quota_bytes: 5 * GB, used_bytes: 3.1 * GB,
+          bandwidth_kbps: null, disabled: false, online: true,
+          static_ips: { server: { static_ip: "10.9.0.50", pinned: true } },
+        },
+        {
+          name: "bob-laptop", team: "sales", created: iso(daysAgo(19)), expires: iso(daysFromNow(346)),
+          max_connections: 1, quota_bytes: null, used_bytes: 41.7 * GB,
+          bandwidth_kbps: 20000, disabled: false, online: false, static_ips: {},
+        },
+        {
+          name: "work-desktop", team: null, created: iso(daysAgo(6)), expires: iso(daysFromNow(359)),
+          max_connections: 1, quota_bytes: null, used_bytes: 2.4 * GB,
+          bandwidth_kbps: null, disabled: false, online: true, static_ips: {},
+        },
+        {
+          name: "guest-tablet", team: null, created: iso(daysAgo(88)), expires: iso(daysFromNow(2)),
+          max_connections: 1, quota_bytes: 2 * GB, used_bytes: 2 * GB,
+          bandwidth_kbps: null, disabled: true, online: false, static_ips: {},
+        },
+      ],
+      2: [
+        {
+          name: "ny-office-router", team: "ops", created: iso(daysAgo(55)), expires: iso(daysFromNow(310)),
+          max_connections: 3, quota_bytes: null, used_bytes: 88 * GB,
+          bandwidth_kbps: null, disabled: false, online: false,
+          static_ips: { server: { static_ip: "10.9.0.10", pinned: true } },
+        },
+      ],
+    },
+    endpointsByServer: {
+      1: [
+        { name: "server", port: 1194, protocol: "udp", cipher: "AES-128-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(120)) },
+        { name: "stealth-443", port: 443, protocol: "tcp", cipher: "CHACHA20-POLY1305", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(30)) },
+      ],
+      2: [
+        { name: "server", port: 1194, protocol: "udp", cipher: "AES-256-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(60)) },
+        { name: "tcp-8443", port: 8443, protocol: "tcp", cipher: "AES-256-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(daysAgo(45)) },
+      ],
+    },
     settings: {
       session_timeout_minutes: 0, lockout_max_attempts: 5, lockout_seconds: 300,
       notify_webhook_enabled: false, notify_webhook_url: "",
       notify_telegram_enabled: false, notify_telegram_bot_token: "", notify_telegram_chat_id: "",
       client_default_max_connections: 1, client_default_quota_gb: null,
       client_default_bandwidth_mbps: null, client_default_validity_days: 365,
-      retention_points: 60, panel_version: "1.0.0",
+      retention_points: 60, panel_version: "2.0.0",
       panel_repo: "https://github.com/CodeScaffold/openvpn-dashboard",
     },
   };
 
-  function daysAgo(n) { return now() - n * 86400; }
-  function daysFromNow(n) { return now() + n * 86400; }
-  function iso(unixSeconds) { return new Date(unixSeconds * 1000).toISOString(); }
+  let nextServerId = 3;
 
-  // ---------- live-looking system metrics ----------
+  // ---------- live-looking system metrics (server 1 only — server 2 is offline) ----------
 
   const HISTORY_LEN = 60;
   const sys = { cpu: [], mem: [], swap: [], disk: [], net: [], conn: [] };
@@ -80,7 +116,7 @@
     const diskPct = 46;
     netBase.rx = clamp(netBase.rx + (Math.random() - 0.5) * 30000, 3000, 400000);
     netBase.tx = clamp(netBase.tx + (Math.random() - 0.5) * 60000, 5000, 900000);
-    const tcp = state.clients.filter((c) => c.online).length;
+    const tcp = state.clientsByServer[1].filter((c) => c.online).length;
     const udp = 0;
 
     sys.cpu.push({ t, v: round1(cpuBase) });
@@ -98,41 +134,55 @@
   seedHistory();
   setInterval(tick, 4000); // faster than the real 15s poller — livelier for a demo
 
-  function systemSnapshot() {
-    const memTotal = 2_000_000_000, swapTotal = 2_147_000_000, diskTotal = 39_000_000_000;
-    return {
-      cpu_percent: sys.cpu.at(-1).v,
-      memory: { total: memTotal, used: Math.round((memBase / 100) * memTotal) },
-      swap: { total: swapTotal, used: Math.round((sys.swap.at(-1).v / 100) * swapTotal) },
-      disk: { total: diskTotal, used: Math.round((sys.disk.at(-1).v / 100) * diskTotal) },
-      uptime_seconds: 14 * 86400 + 3600 * 6,
+  const MEM_TOTAL = 2_000_000_000, SWAP_TOTAL = 2_147_000_000, DISK_TOTAL = 39_000_000_000;
+
+  // Matches the real /api/servers/{id}/system shape: {online, latest, history, vpn_endpoint}.
+  // "latest" carries the full raw telemetry snapshot (only available while online, same as
+  // the real hub); "history" is the persisted per-point mirror (flat metric columns).
+  function systemPayload(server) {
+    if (!server.online) {
+      return { online: false, latest: null, history: [], vpn_endpoint: server.vpn_endpoint };
+    }
+    const history = sys.cpu.map((_, i) => ({
+      t: sys.cpu[i].t, cpu_percent: sys.cpu[i].v,
+      mem_used: Math.round((sys.mem[i].v / 100) * MEM_TOTAL), mem_total: MEM_TOTAL,
+      swap_used: Math.round((sys.swap[i].v / 100) * SWAP_TOTAL), swap_total: SWAP_TOTAL,
+      disk_used: Math.round((sys.disk[i].v / 100) * DISK_TOTAL), disk_total: DISK_TOTAL,
+      net_rx_bps: sys.net[i].rx_bps, net_tx_bps: sys.net[i].tx_bps,
+      tcp_count: sys.conn[i].tcp, udp_count: sys.conn[i].udp,
+    }));
+    const last = history[history.length - 1];
+    const latest = {
+      ...last,
+      memory: { used: last.mem_used, total: last.mem_total },
+      swap: { used: last.swap_used, total: last.swap_total },
+      disk: { used: last.disk_used, total: last.disk_total },
       net_totals: { rx: 7_100_000_000, tx: 6_800_000_000 },
-      network_history: sys.net, cpu_history: sys.cpu, mem_history: sys.mem,
-      swap_history: sys.swap, disk_history: sys.disk, conn_history: sys.conn,
+      uptime_seconds: 14 * 86400 + 3600 * 6,
       process_mem_bytes: 54_000_000,
-      openvpn_uptime_seconds: 14 * 86400 + 1500,
-      vpn_endpoint: "vpn.example.com",
     };
+    return { online: true, latest, history, vpn_endpoint: server.vpn_endpoint };
   }
 
   function clientView(c) {
     return {
-      name: c.name, created: c.created, expires: c.expires,
+      name: c.name, team: c.team, created: c.created, expires: c.expires,
       max_connections: c.max_connections, quota_bytes: c.quota_bytes,
       used_bytes: c.used_bytes, bandwidth_kbps: c.bandwidth_kbps, disabled: c.disabled,
+      static_ips: c.static_ips || {},
     };
   }
 
-  function endpointView(e) {
+  function endpointView(e, clients) {
     return {
       name: e.name, port: e.port, protocol: e.protocol, cipher: e.cipher,
       dns1: e.dns1, dns2: e.dns2, active: true,
-      online: state.clients.filter((c) => c.online).length, created: e.created,
+      online: clients.filter((c) => c.online).length, created: e.created,
     };
   }
 
-  function sessionsView() {
-    return state.clients.filter((c) => c.online).map((c, i) => ({
+  function sessionsView(clients) {
+    return clients.filter((c) => c.online).map((c, i) => ({
       name: c.name, real_address: `203.0.113.${10 + i}`, virtual_address: `10.9.0.${10 + i}`,
       bytes_received: Math.round(c.used_bytes * 0.4), bytes_sent: Math.round(c.used_bytes * 0.6),
       connected_since: iso(now() - (1800 + i * 900)), client_id: String(i + 1), endpoint: "server",
@@ -145,8 +195,6 @@
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   }
 
-  const realFetch = window.fetch.bind(window);
-
   window.fetch = async (url, opts = {}) => {
     const path = new URL(url, location.href).pathname.replace(/^.*\/(api\/.*)$/, "/$1");
     const method = (opts.method || "GET").toUpperCase();
@@ -157,92 +205,161 @@
 
     if (method === "POST" && path === "/api/login") return jsonResponse({ ok: true });
     if (method === "POST" && path === "/api/logout") return jsonResponse({ ok: true });
-
-    if (method === "GET" && path === "/api/clients") return jsonResponse(state.clients.map(clientView));
-    if (method === "GET" && path === "/api/endpoints") return jsonResponse(state.endpoints.map(endpointView));
-    if (method === "GET" && path === "/api/status") return jsonResponse(sessionsView());
-    if (method === "GET" && path === "/api/system") return jsonResponse(systemSnapshot());
     if (method === "GET" && path === "/api/settings") return jsonResponse(state.settings);
 
-    if (method === "POST" && path === "/api/clients") {
-      if (state.clients.some((c) => c.name === body.name)) {
-        return jsonResponse({ detail: "A client with that name already exists." }, 409);
-      }
-      const days = body.validity_days || 365;
-      const c = {
-        name: body.name, created: iso(now()), expires: iso(daysFromNow(days)),
-        max_connections: body.max_connections || 1,
-        quota_bytes: body.quota_gb ? body.quota_gb * GB : null,
-        used_bytes: 0, bandwidth_kbps: body.bandwidth_mbps ? body.bandwidth_mbps * 1000 : null,
-        disabled: false, online: false,
+    // ---- servers (hub-level) ----
+    if (method === "GET" && path === "/api/servers") {
+      return jsonResponse(state.servers.map((s) => ({ ...s })));
+    }
+    if (method === "POST" && path === "/api/servers") {
+      const s = {
+        id: nextServerId++, name: body.name, label: body.label || "", online: false,
+        agent_version: null, hostname: null, public_addr: null,
+        vpn_endpoint: body.vpn_endpoint, last_seen: null, created: iso(now()),
       };
-      state.clients.push(c);
-      return jsonResponse(clientView(c), 201);
+      state.servers.push(s);
+      state.clientsByServer[s.id] = [];
+      state.endpointsByServer[s.id] = [
+        { name: "server", port: 1194, protocol: "udp", cipher: "AES-128-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(now()) },
+        { name: "backup-443", port: 443, protocol: "tcp", cipher: "AES-256-GCM", dns1: "1.1.1.1", dns2: "1.0.0.1", created: iso(now()) },
+      ];
+      return jsonResponse({ id: s.id, name: s.name, install_token: "demo-token-not-real-" + Math.random().toString(36).slice(2, 10) }, 201);
     }
 
     let m;
-    if ((m = path.match(/^\/api\/clients\/([^/]+)\/limits$/)) && method === "PUT") {
-      const c = state.clients.find((x) => x.name === decodeURIComponent(m[1]));
+    if ((m = path.match(/^\/api\/servers\/(\d+)$/)) && method === "PUT") {
+      const s = state.servers.find((x) => x.id === Number(m[1]));
+      if (!s) return jsonResponse({ detail: "Server not found." }, 404);
+      if (state.servers.some((x) => x.id !== s.id && x.name === body.name)) {
+        return jsonResponse({ detail: `A server named "${body.name}" already exists.` }, 400);
+      }
+      s.name = body.name;
+      s.label = body.label || "";
+      s.vpn_endpoint = body.vpn_endpoint;
+      return jsonResponse({ ok: true });
+    }
+    if ((m = path.match(/^\/api\/servers\/(\d+)$/)) && method === "DELETE") {
+      const id = Number(m[1]);
+      state.servers = state.servers.filter((x) => x.id !== id);
+      delete state.clientsByServer[id];
+      delete state.endpointsByServer[id];
+      return jsonResponse({ ok: true });
+    }
+
+    // ---- everything else is server-scoped: /api/servers/{id}/... ----
+    const scoped = path.match(/^\/api\/servers\/(\d+)(\/.*)$/);
+    if (!scoped) return jsonResponse({ ok: true });
+    const serverId = Number(scoped[1]);
+    const rest = scoped[2];
+    const server = state.servers.find((x) => x.id === serverId);
+    if (!server) return jsonResponse({ detail: "Server not found." }, 404);
+    const clients = state.clientsByServer[serverId] || [];
+    const endpoints = state.endpointsByServer[serverId] || [];
+    const offline = () => jsonResponse({ detail: "Server is not currently connected." }, 503);
+
+    if (method === "GET" && rest === "/system") return jsonResponse(systemPayload(server));
+    if (method === "GET" && rest === "/status") return jsonResponse(server.online ? sessionsView(clients) : []);
+    if (method === "GET" && rest === "/clients") {
+      return jsonResponse(server.online ? clients.map(clientView) : clients.map((c) => ({ ...clientView(c), stale: true })));
+    }
+    if (method === "GET" && rest === "/endpoints") {
+      const views = endpoints.map((e) => endpointView(e, clients));
+      return jsonResponse(server.online ? views : views.map((v) => ({ ...v, stale: true })));
+    }
+
+    if (method === "POST" && rest === "/clients") {
+      if (!server.online) return offline();
+      if (clients.some((c) => c.name === body.name)) {
+        return jsonResponse({ detail: "A client with that name already exists." }, 409);
+      }
+      if (body.name === "server") return jsonResponse({ detail: "That name is reserved." }, 400);
+      const days = body.validity_days || 365;
+      const c = {
+        name: body.name, team: body.team || null, created: iso(now()), expires: iso(daysFromNow(days)),
+        max_connections: body.max_connections || 1,
+        quota_bytes: body.quota_gb ? body.quota_gb * GB : null,
+        used_bytes: 0, bandwidth_kbps: body.bandwidth_mbps ? body.bandwidth_mbps * 1000 : null,
+        disabled: false, online: false, static_ips: {},
+      };
+      clients.push(c);
+      return jsonResponse(clientView(c), 201);
+    }
+
+    if ((m = rest.match(/^\/clients\/([^/]+)\/download$/)) && method === "GET") {
+      if (!server.online) return offline();
+      return jsonResponse({ detail: "Downloads aren't available in the demo — clone the repo to try this for real." }, 400);
+    }
+    if ((m = rest.match(/^\/clients\/([^/]+)\/limits$/)) && method === "PUT") {
+      if (!server.online) return offline();
+      const c = clients.find((x) => x.name === decodeURIComponent(m[1]));
       if (!c) return jsonResponse({ detail: "Client not found." }, 404);
       c.max_connections = body.max_connections || 1;
       c.quota_bytes = body.quota_gb ? body.quota_gb * GB : null;
       c.bandwidth_kbps = body.bandwidth_mbps ? body.bandwidth_mbps * 1000 : null;
+      if ("team" in body) c.team = body.team;
       return jsonResponse(clientView(c));
     }
-    if ((m = path.match(/^\/api\/clients\/([^/]+)\/reset-usage$/)) && method === "POST") {
-      const c = state.clients.find((x) => x.name === decodeURIComponent(m[1]));
+    if ((m = rest.match(/^\/clients\/([^/]+)\/static-ip$/)) && method === "PUT") {
+      if (!server.online) return offline();
+      const c = clients.find((x) => x.name === decodeURIComponent(m[1]));
+      if (!c) return jsonResponse({ detail: "Client not found." }, 404);
+      const ep = endpoints.find((e) => e.name === body.endpoint);
+      if (!ep) return jsonResponse({ detail: "Endpoint not found." }, 404);
+      c.static_ips = c.static_ips || {};
+      if (body.static_ip) {
+        const owner = clients.find((o) => o !== c && o.static_ips && o.static_ips[body.endpoint] && o.static_ips[body.endpoint].static_ip === body.static_ip);
+        if (owner) return jsonResponse({ detail: `${body.static_ip} is already assigned to client "${owner.name}" on this endpoint.` }, 409);
+        c.static_ips[body.endpoint] = { static_ip: body.static_ip, pinned: true };
+      } else {
+        delete c.static_ips[body.endpoint];
+      }
+      return jsonResponse(clientView(c));
+    }
+    if ((m = rest.match(/^\/clients\/([^/]+)\/reset-usage$/)) && method === "POST") {
+      if (!server.online) return offline();
+      const c = clients.find((x) => x.name === decodeURIComponent(m[1]));
       if (!c) return jsonResponse({ detail: "Client not found." }, 404);
       c.used_bytes = 0; c.disabled = false;
       return jsonResponse(clientView(c));
     }
-    if ((m = path.match(/^\/api\/clients\/([^/]+)\/renew$/)) && method === "POST") {
-      const c = state.clients.find((x) => x.name === decodeURIComponent(m[1]));
+    if ((m = rest.match(/^\/clients\/([^/]+)\/renew$/)) && method === "POST") {
+      if (!server.online) return offline();
+      const c = clients.find((x) => x.name === decodeURIComponent(m[1]));
       if (!c) return jsonResponse({ detail: "Client not found." }, 404);
       c.expires = iso(daysFromNow(body.validity_days || 365));
       return jsonResponse(clientView(c));
     }
-    if ((m = path.match(/^\/api\/clients\/([^/]+)$/)) && method === "DELETE") {
+    if ((m = rest.match(/^\/clients\/([^/]+)$/)) && method === "DELETE") {
+      if (!server.online) return offline();
       const name = decodeURIComponent(m[1]);
-      state.clients = state.clients.filter((x) => x.name !== name);
+      state.clientsByServer[serverId] = clients.filter((x) => x.name !== name);
       return jsonResponse({ ok: true });
     }
 
-    if (method === "POST" && path === "/api/endpoints") {
+    if (method === "POST" && rest === "/endpoints") {
+      if (!server.online) return offline();
       const e = { name: body.name, port: body.port, protocol: body.protocol, cipher: body.cipher, dns1: body.dns1 || "", dns2: body.dns2 || "", created: iso(now()) };
-      state.endpoints.push(e);
-      return jsonResponse(endpointView(e), 201);
+      endpoints.push(e);
+      return jsonResponse(endpointView(e, clients), 201);
     }
-    if ((m = path.match(/^\/api\/endpoints\/([^/]+)$/)) && method === "DELETE") {
-      state.endpoints = state.endpoints.filter((x) => x.name !== decodeURIComponent(m[1]));
+    if ((m = rest.match(/^\/endpoints\/([^/]+)$/)) && method === "DELETE") {
+      if (!server.online) return offline();
+      state.endpointsByServer[serverId] = endpoints.filter((x) => x.name !== decodeURIComponent(m[1]));
       return jsonResponse({ ok: true });
     }
-    if (path.match(/^\/api\/endpoints\/[^/]+\/(restart|stop|start)$/) && method === "POST") {
+    if (rest.match(/^\/endpoints\/[^/]+\/(restart|stop|start)$/) && method === "POST") {
+      if (!server.online) return offline();
       return jsonResponse({ ok: true });
     }
-    if (path.match(/^\/api\/endpoints\/[^/]+\/logs$/)) {
+    if (rest.match(/^\/endpoints\/[^/]+\/logs$/)) {
+      if (!server.online) return offline();
       return jsonResponse({ logs: demoLogLines() });
     }
-    if (path.match(/^\/api\/endpoints\/[^/]+\/config$/)) {
+    if (rest.match(/^\/endpoints\/[^/]+\/config$/)) {
+      if (!server.online) return offline();
       return jsonResponse({ config: "port 1194\nproto udp\ndev tun\n... (demo — see the README for the real file)" });
     }
-
-    if (method === "PUT" && path.startsWith("/api/settings/")) {
-      const key = path.split("/").pop();
-      const map = {
-        security: ["session_timeout_minutes", "lockout_max_attempts", "lockout_seconds"],
-        notifications: ["notify_webhook_enabled", "notify_webhook_url", "notify_telegram_enabled", "notify_telegram_bot_token", "notify_telegram_chat_id"],
-        "client-defaults": ["client_default_max_connections", "client_default_quota_gb", "client_default_bandwidth_mbps", "client_default_validity_days"],
-        retention: [],
-      };
-      if (key === "retention") { state.settings.retention_points = body.points; return jsonResponse({ ok: true }); }
-      if (key === "password") return jsonResponse({ ok: true });
-      (map[key] || []).forEach((f) => { if (f in body) state.settings[f] = body[f]; });
-      return jsonResponse({ ok: true });
-    }
-    if (method === "POST" && path === "/api/settings/logout-others") return jsonResponse({ ok: true });
-    if (method === "POST" && path === "/api/settings/notifications/test") return jsonResponse({ ok: true });
-
-    if (path === "/api/backup" || path === "/api/backup/restore") {
+    if (rest === "/backup" || rest === "/backup/restore") {
       return jsonResponse({ detail: "Backup/restore isn't available in the demo — clone the repo to try it for real." }, 400);
     }
 

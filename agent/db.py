@@ -3,59 +3,77 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from common.migrate import apply_migrations
+
 DB_PATH = Path("/etc/openvpn/clients/limits.db")
 
 _local = threading.local()
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS client_limits (
-    name TEXT PRIMARY KEY,
-    max_connections INTEGER NOT NULL DEFAULT 1,
-    quota_bytes INTEGER,
-    used_bytes INTEGER NOT NULL DEFAULT 0,
-    bandwidth_kbps INTEGER,
-    static_ip TEXT,
-    disabled INTEGER NOT NULL DEFAULT 0
-);
 
-CREATE TABLE IF NOT EXISTS endpoints (
-    name TEXT PRIMARY KEY,
-    port INTEGER NOT NULL,
-    protocol TEXT NOT NULL,
-    cipher TEXT NOT NULL,
-    mgmt_port INTEGER NOT NULL,
-    tun_dev TEXT NOT NULL,
-    subnet TEXT NOT NULL,
-    dns1 TEXT,
-    dns2 TEXT,
-    ccd_dir TEXT NOT NULL,
-    created TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS client_endpoint_ip (
-    client_name TEXT NOT NULL,
-    endpoint_name TEXT NOT NULL,
-    static_ip TEXT NOT NULL,
-    PRIMARY KEY (client_name, endpoint_name)
-);
-
-CREATE TABLE IF NOT EXISTS session_baseline (
-    endpoint_name TEXT NOT NULL,
-    client_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    bytes_seen INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (endpoint_name, client_id)
-);
-"""
-
-
-def _migrate_session_baseline(conn: sqlite3.Connection) -> None:
-    """session_baseline predates the multi-endpoint schema (client_id, name, bytes_seen
-    only). CREATE TABLE IF NOT EXISTS is a no-op against that old table, so detect it
-    and rebuild — the data is just a rolling accumulation baseline, safe to drop."""
+def _migration_1(conn: sqlite3.Connection) -> None:
+    """Base schema. Also folds in the old pre-multi-endpoint
+    _migrate_session_baseline hack: that table used to be (client_id, name,
+    bytes_seen) only, and CREATE TABLE IF NOT EXISTS is a no-op against an
+    existing table with the wrong shape, so detect and rebuild it first —
+    the data is just a rolling accumulation baseline, safe to drop."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(session_baseline)").fetchall()}
     if cols and "endpoint_name" not in cols:
         conn.execute("DROP TABLE session_baseline")
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS client_limits (
+            name TEXT PRIMARY KEY,
+            max_connections INTEGER NOT NULL DEFAULT 1,
+            quota_bytes INTEGER,
+            used_bytes INTEGER NOT NULL DEFAULT 0,
+            bandwidth_kbps INTEGER,
+            static_ip TEXT,
+            disabled INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS endpoints (
+            name TEXT PRIMARY KEY,
+            port INTEGER NOT NULL,
+            protocol TEXT NOT NULL,
+            cipher TEXT NOT NULL,
+            mgmt_port INTEGER NOT NULL,
+            tun_dev TEXT NOT NULL,
+            subnet TEXT NOT NULL,
+            dns1 TEXT,
+            dns2 TEXT,
+            ccd_dir TEXT NOT NULL,
+            created TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS client_endpoint_ip (
+            client_name TEXT NOT NULL,
+            endpoint_name TEXT NOT NULL,
+            static_ip TEXT NOT NULL,
+            PRIMARY KEY (client_name, endpoint_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS session_baseline (
+            endpoint_name TEXT NOT NULL,
+            client_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            bytes_seen INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (endpoint_name, client_id)
+        );
+    """)
+
+
+def _migration_2(conn: sqlite3.Connection) -> None:
+    """Static IPs become admin-pinnable and independent of bandwidth caps
+    (see apply_limits: removing a bandwidth cap used to silently strip the
+    client's static IP). team groups clients for the multi-server UI."""
+    conn.execute("ALTER TABLE client_endpoint_ip ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE client_limits ADD COLUMN team TEXT")
+
+
+MIGRATIONS = [
+    (1, "base schema", _migration_1),
+    (2, "pinned static ips + team", _migration_2),
+]
 
 
 def get_conn() -> sqlite3.Connection:
@@ -65,9 +83,7 @@ def get_conn() -> sqlite3.Connection:
         conn = sqlite3.connect(DB_PATH, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        _migrate_session_baseline(conn)
-        conn.executescript(SCHEMA)
-        conn.commit()
+        apply_migrations(conn, MIGRATIONS)
         _local.conn = conn
     return conn
 
@@ -97,6 +113,7 @@ def update_limits(
     quota_bytes: int | None = "unset",
     bandwidth_kbps: int | None = "unset",
     disabled: int | None = None,
+    team: str | None = "unset",
 ) -> None:
     ensure_client_row(name)
     conn = get_conn()
@@ -114,6 +131,9 @@ def update_limits(
     if disabled is not None:
         fields.append("disabled = ?")
         values.append(disabled)
+    if team != "unset":
+        fields.append("team = ?")
+        values.append(team)
     if not fields:
         return
     values.append(name)
@@ -183,7 +203,13 @@ def next_mgmt_port() -> int:
     return (row["m"] or 7504) + 1
 
 
-# ---------------- per-endpoint static IPs (bandwidth-capped clients) ----------------
+# ---------------- per-endpoint static IPs ----------------
+# Two different reasons a client ends up with a static IP, tracked by `pinned`:
+#   - auto-allocated as a side effect of a bandwidth cap (pinned=0, tc needs a stable
+#     target address) — ephemeral, cleared when the cap is removed.
+#   - explicitly assigned by an admin via client.set_static_ip (pinned=1) — durable,
+#     survives bandwidth changes. This is what makes IP-based downstream auth safe: a
+#     pinned assignment is never silently dropped by an unrelated limits edit.
 
 def get_client_ips(client_name: str) -> dict[str, str]:
     conn = get_conn()
@@ -191,6 +217,14 @@ def get_client_ips(client_name: str) -> dict[str, str]:
         "SELECT endpoint_name, static_ip FROM client_endpoint_ip WHERE client_name = ?", (client_name,)
     ).fetchall()
     return {r["endpoint_name"]: r["static_ip"] for r in rows}
+
+
+def get_client_ip_pins(client_name: str) -> dict[str, bool]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT endpoint_name, pinned FROM client_endpoint_ip WHERE client_name = ?", (client_name,)
+    ).fetchall()
+    return {r["endpoint_name"]: bool(r["pinned"]) for r in rows}
 
 
 def get_endpoint_used_ips(endpoint_name: str) -> set[str]:
@@ -201,19 +235,43 @@ def get_endpoint_used_ips(endpoint_name: str) -> set[str]:
     return {r["static_ip"] for r in rows}
 
 
-def set_client_ip(client_name: str, endpoint_name: str, static_ip: str) -> None:
+def get_ip_owner(endpoint_name: str, static_ip: str) -> str | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT client_name FROM client_endpoint_ip WHERE endpoint_name = ? AND static_ip = ?",
+        (endpoint_name, static_ip),
+    ).fetchone()
+    return row["client_name"] if row else None
+
+
+def set_client_ip(client_name: str, endpoint_name: str, static_ip: str, pinned: bool = False) -> None:
     conn = get_conn()
     conn.execute(
-        "INSERT INTO client_endpoint_ip (client_name, endpoint_name, static_ip) VALUES (?, ?, ?) "
-        "ON CONFLICT(client_name, endpoint_name) DO UPDATE SET static_ip = excluded.static_ip",
-        (client_name, endpoint_name, static_ip),
+        "INSERT INTO client_endpoint_ip (client_name, endpoint_name, static_ip, pinned) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(client_name, endpoint_name) DO UPDATE SET static_ip = excluded.static_ip, pinned = excluded.pinned",
+        (client_name, endpoint_name, static_ip, int(pinned)),
     )
     conn.commit()
 
 
-def clear_client_ips(client_name: str) -> None:
+def clear_client_ip(client_name: str, endpoint_name: str) -> None:
+    """Removes one endpoint's IP assignment for a client regardless of pin
+    state — used by the explicit unpin/clear path (client.set_static_ip with
+    no static_ip), which is itself an admin action, not an incidental one."""
     conn = get_conn()
-    conn.execute("DELETE FROM client_endpoint_ip WHERE client_name = ?", (client_name,))
+    conn.execute(
+        "DELETE FROM client_endpoint_ip WHERE client_name = ? AND endpoint_name = ?",
+        (client_name, endpoint_name),
+    )
+    conn.commit()
+
+
+def clear_unpinned_client_ips(client_name: str) -> None:
+    """Called when a bandwidth cap is removed — clears only the IPs that
+    were auto-allocated as a side effect of that cap, leaving any admin-
+    pinned assignment untouched."""
+    conn = get_conn()
+    conn.execute("DELETE FROM client_endpoint_ip WHERE client_name = ? AND pinned = 0", (client_name,))
     conn.commit()
 
 

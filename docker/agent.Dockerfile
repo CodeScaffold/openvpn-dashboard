@@ -1,7 +1,8 @@
-# Runs systemd as PID 1 so the app's own service-management code (systemctl,
+# Runs systemd as PID 1 so the agent's own service-management code (systemctl,
 # journalctl, the sudoers grants documented in the README) works completely
-# unchanged, identically to a bare-metal install — see docker/first-boot.sh
-# for the one-time setup that replaces the README's manual steps.
+# unchanged, identically to a bare-metal install — see agent-first-boot.sh
+# for the one-time setup that replaces agent/install.sh's steps. Build
+# context is the repo root: docker build -f docker/agent.Dockerfile .
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,18 +24,18 @@ RUN systemctl mask \
     || true
 
 WORKDIR /opt/ovpn-dashboard
-COPY app ./app
-COPY static ./static
+COPY agent ./agent
+COPY common ./common
 COPY requirements.txt ./
 
 RUN python3 -m venv venv && venv/bin/pip install --no-cache-dir -r requirements.txt
 
-COPY docker/first-boot.sh /usr/local/bin/first-boot.sh
-COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY docker/first-boot.service /etc/systemd/system/first-boot.service
-COPY docker/ovpn-dashboard.service /etc/systemd/system/ovpn-dashboard.service
-RUN chmod +x /usr/local/bin/first-boot.sh /usr/local/bin/docker-entrypoint.sh \
-    && systemctl enable first-boot.service \
+COPY docker/agent-first-boot.sh /usr/local/bin/agent-first-boot.sh
+COPY docker/agent-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docker/agent-first-boot.service /etc/systemd/system/agent-first-boot.service
+COPY docker/ovpn-agent.service /etc/systemd/system/ovpn-agent.service
+RUN chmod +x /usr/local/bin/agent-first-boot.sh /usr/local/bin/docker-entrypoint.sh \
+    && systemctl enable agent-first-boot.service \
     && mkdir -p /etc/openvpn/easy-rsa \
     && cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
 

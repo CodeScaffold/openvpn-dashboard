@@ -1,20 +1,34 @@
 import asyncio
 import logging
 from collections import defaultdict
+from dataclasses import dataclass, field
 
-from . import db, endpoints as endpoints_mod, mgmt, netlimit, notify, settings, system
+from . import db, endpoints as endpoints_mod, mgmt, netlimit, system
 
-log = logging.getLogger("ovpn-dashboard.poller")
+log = logging.getLogger("ovpn-agent.poller")
 
 INTERVAL_SECONDS = 15
 
 _endpoint_was_active: dict[str, bool] = {}
 
 
-def reconcile() -> None:
+@dataclass
+class ReconcileResult:
+    events: list[tuple[str, str]] = field(default_factory=list)
+    tcp_count: int = 0
+    udp_count: int = 0
+
+
+def reconcile() -> ReconcileResult:
+    """Runs one enforcement cycle against this box's own OpenVPN endpoints.
+    events are (event, message) pairs for the caller to forward to the hub as
+    notify events — the agent has no webhook/Telegram settings of its own,
+    those live on the dashboard."""
+    result = ReconcileResult()
+
     endpoints = db.get_all_endpoints()
     if not endpoints:
-        return
+        return result
     endpoints_by_name = {e["name"]: e for e in endpoints}
 
     sessions = mgmt.get_all_sessions(endpoints)
@@ -23,11 +37,10 @@ def reconcile() -> None:
         ep = endpoints_by_name.get(endpoint_name)
         return ep["protocol"] if ep else ""
 
-    tcp_count = sum(1 for s in sessions if _protocol(s.endpoint) == "tcp")
-    udp_count = sum(1 for s in sessions if _protocol(s.endpoint) == "udp")
-    system.record_connections(tcp_count, udp_count)
+    result.tcp_count = sum(1 for s in sessions if _protocol(s.endpoint) == "tcp")
+    result.udp_count = sum(1 for s in sessions if _protocol(s.endpoint) == "udp")
 
-    by_name: dict[str, list[mgmt.Session]] = defaultdict(list)
+    by_name: dict[str, list] = defaultdict(list)
     for s in sessions:
         if s.client_id:
             by_name[s.name].append(s)
@@ -49,9 +62,8 @@ def reconcile() -> None:
             db.add_used_bytes(s.name, delta)
 
     limits = db.get_all_limits()
-    cfg = settings.load()
 
-    def kill(session: mgmt.Session) -> None:
+    def kill(session) -> None:
         ep = endpoints_by_name.get(session.endpoint)
         if not ep:
             return
@@ -73,7 +85,7 @@ def reconcile() -> None:
             client_ips = db.get_client_ips(name)
             for ep in endpoints:
                 netlimit.write_ccd(ep["ccd_dir"], name, client_ips.get(ep["name"]), disabled=True)
-            notify.notify(cfg, "quota_exceeded", f'Client "{name}" hit its data quota and was disabled.')
+            result.events.append(("quota_exceeded", f'Client "{name}" hit its data quota and was disabled.'))
 
     # enforce max_connections (aggregated across all endpoints): keep the oldest N, kill the rest
     for name, sessions_for_name in by_name.items():
@@ -86,27 +98,36 @@ def reconcile() -> None:
                 log.info("client %s over max_connections (%d), killing session %s on %s",
                           name, max_conn, s.client_id, s.endpoint)
                 kill(s)
-            notify.notify(
-                cfg, "max_connections",
+            result.events.append((
+                "max_connections",
                 f'Client "{name}" exceeded its {max_conn}-connection limit; {len(excess)} extra session(s) killed.',
-            )
+            ))
 
     # endpoint up/down transitions
     for ep in endpoints:
         active = endpoints_mod.is_active(ep["name"])
         was = _endpoint_was_active.get(ep["name"])
         if was is not None and was and not active:
-            notify.notify(cfg, "endpoint_down", f'Endpoint "{ep["name"]}" is no longer active.')
+            result.events.append(("endpoint_down", f'Endpoint "{ep["name"]}" is no longer active.'))
         elif was is not None and not was and active:
-            notify.notify(cfg, "endpoint_up", f'Endpoint "{ep["name"]}" is back up.')
+            result.events.append(("endpoint_up", f'Endpoint "{ep["name"]}" is back up.'))
         _endpoint_was_active[ep["name"]] = active
+
+    return result
 
 
 async def run_forever() -> None:
+    """Transitional: runs the enforcement loop locally, same cadence as
+    before. Events from reconcile() are logged, not delivered anywhere yet —
+    once the hub/WS link exists (transport step), this loop moves into
+    agent/main.py and forwards events there instead of dropping them."""
     while True:
         await asyncio.sleep(INTERVAL_SECONDS)
         try:
             await asyncio.to_thread(system.sample)
-            await asyncio.to_thread(reconcile)
+            result = await asyncio.to_thread(reconcile)
+            for event, message in result.events:
+                log.info("event (no hub connected yet, dropped): %s: %s", event, message)
+            system.record_connections(result.tcp_count, result.udp_count)
         except Exception:
             log.exception("poller cycle failed")

@@ -1,20 +1,8 @@
 import socket
-from dataclasses import dataclass
+
+from common.wire import Session
 
 MGMT_HOST = "127.0.0.1"
-
-
-@dataclass
-class Session:
-    name: str
-    real_address: str
-    virtual_address: str
-    bytes_received: int
-    bytes_sent: int
-    connected_since: str
-    connected_since_t: int
-    client_id: str
-    endpoint: str = ""
 
 
 def _read_until_end(sock: socket.socket, timeout: float = 4.0) -> str:
