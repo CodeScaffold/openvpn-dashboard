@@ -66,7 +66,7 @@ git clone https://github.com/CodeScaffold/openvpn-dashboard
 cd openvpn-dashboard
 docker build -f docker/agent.Dockerfile -t ovpn-agent .
 docker run -d --name ovpn-agent --restart unless-stopped \
-  --privileged --cgroup host \
+  --privileged --cgroupns=host \
   -v ovpn-openvpn:/etc/openvpn -v ovpn-agent-config:/etc/ovpn-dashboard -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   --network host \
   -e HUB_URL=wss://panel.example.com/agent/ws -e AGENT_TOKEN=<token> \
@@ -76,6 +76,22 @@ docker run -d --name ovpn-agent --restart unless-stopped \
 The agent shows online in the dashboard within a few seconds. Repeat step 2 and 3 for every additional server — each is fully independent.
 
 **Why the agent needs `--privileged` and host networking, but the hub doesn't:** OpenVPN needs to configure real NAT/routing for tunneled traffic, which bridge networking can't do transparently — this is standard for any containerized VPN server. The hub does none of that, so it stays a completely ordinary container.
+
+### Multiple exit IPs on one box
+
+Add-on IPs (e.g. Hetzner Floating IPs) can each back their own fully independent server —
+own PKI, own agent identity, own entry on the Servers page — instead of one server per
+physical box. Repeat steps 2–3 above once per IP, and on step 3 add one more variable:
+
+```bash
+-e BIND_IP=<that IP>
+```
+
+(`sudo BIND_IP=<that IP> HUB_URL=... AGENT_TOKEN=... bash` for the non-Docker installer.)
+That pins the agent's OpenVPN listeners and its clients' outbound NAT to exactly that
+address — not the box's default one — so several agents can share a host, each answering
+only on its own IP, even on the same port. First add the IP to the box itself (e.g. a
+Hetzner Floating IP assigned in its Cloud Console), then install each agent as usual.
 
 Not interested in Docker? Same install, done by hand — expand below.
 

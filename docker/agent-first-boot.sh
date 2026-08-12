@@ -35,12 +35,79 @@ esac
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-endpoint-ctl
 
+# Same rationale, one POSTROUTING NAT rule per endpoint subnet instead of a wildcard.
+# Called by agent/endpoints.py on every endpoint create/delete, and re-run for every
+# existing endpoint on every agent start (see agent/main.py) since a container
+# restart starts with an empty runtime iptables table.
+cat > /usr/local/bin/ovpn-nat-ctl <<'CTLEOF'
+#!/bin/bash
+set -euo pipefail
+action="${1:-}"
+subnet="${2:-}"
+mode="${3:-}"
+target="${4:-}"
+
+if ! [[ "$subnet" =~ ^10\.9\.[0-9]{1,3}\.0/24$ ]]; then
+  echo "invalid subnet" >&2
+  exit 1
+fi
+
+default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+default_iface="${default_iface:-eth0}"
+
+case "$mode" in
+  snat)
+    if ! [[ "$target" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      echo "invalid target ip" >&2
+      exit 1
+    fi
+    rule=(-s "$subnet" -o "$default_iface" -j SNAT --to-source "$target")
+    ;;
+  masquerade)
+    rule=(-s "$subnet" -o "$default_iface" -j MASQUERADE)
+    ;;
+  *)
+    echo "invalid mode: $mode" >&2
+    exit 1
+    ;;
+esac
+
+case "$action" in
+  add)
+    iptables -t nat -C POSTROUTING "${rule[@]}" 2>/dev/null || iptables -t nat -A POSTROUTING "${rule[@]}"
+    ;;
+  remove)
+    iptables -t nat -D POSTROUTING "${rule[@]}" 2>/dev/null || true
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    exit 1
+    ;;
+esac
+CTLEOF
+chmod 755 /usr/local/bin/ovpn-nat-ctl
+
 cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
 SUDOEOF
 chmod 440 /etc/sudoers.d/ovpndash
+
+# ovpn-agent.service references this via ExecStartPre=+ (see docker/ovpn-agent.service,
+# shared verbatim with the bare-metal install) -- must exist even when BIND_IP is unset
+# on this particular container, or that ExecStartPre fails with 203/EXEC.
+cat > /usr/local/bin/ovpn-bind-ip-ctl <<'CTLEOF'
+#!/bin/bash
+set -euo pipefail
+BIND_IP="${BIND_IP:-}"
+[ -z "$BIND_IP" ] && exit 0
+default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+default_iface="${default_iface:-eth0}"
+ip addr show dev "$default_iface" | grep -q " ${BIND_IP}/32 " || ip addr add "${BIND_IP}/32" dev "$default_iface"
+CTLEOF
+chmod 755 /usr/local/bin/ovpn-bind-ip-ctl
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
@@ -72,17 +139,15 @@ VARSEOF
   # from the dashboard once this agent shows up online, identical for the
   # first endpoint as for the tenth.
 
-  default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
-  default_iface="${default_iface:-eth0}"
-  # /16, not /24: this agent can host several endpoints, each on its own
-  # 10.9.<n>.0/24 slice (see agent/endpoints.py) — one NAT rule needs to
-  # cover all of them, not just the first.
-  iptables -t nat -C POSTROUTING -s 10.9.0.0/16 -o "$default_iface" -j MASQUERADE 2>/dev/null || \
-  iptables -t nat -A POSTROUTING -s 10.9.0.0/16 -o "$default_iface" -j MASQUERADE
+  # NAT is set up per-endpoint at create/delete time instead of one blanket rule
+  # here (see agent/endpoints.py:_ensure_nat and ovpn-nat-ctl above) -- that's what
+  # lets more than one agent instance share this host's network namespace, each
+  # only ever touching its own endpoints' subnets.
 
   {
     echo "HUB_URL=${HUB_URL:?HUB_URL must be set -- pass -e HUB_URL=wss://your-panel/agent/ws}"
     echo "AGENT_TOKEN=${AGENT_TOKEN:?AGENT_TOKEN must be set -- from the dashboard Add Server dialog}"
+    [ -n "${BIND_IP:-}" ] && echo "BIND_IP=${BIND_IP}" || true
   } > /etc/ovpn-dashboard/agent.env
   chmod 600 /etc/ovpn-dashboard/agent.env
 

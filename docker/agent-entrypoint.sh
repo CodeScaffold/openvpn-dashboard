@@ -7,6 +7,7 @@ set -eu
 {
   echo "HUB_URL=${HUB_URL:-}"
   echo "AGENT_TOKEN=${AGENT_TOKEN:-}"
+  echo "BIND_IP=${BIND_IP:-}"
 } > /etc/docker-env
 
 exec /sbin/init

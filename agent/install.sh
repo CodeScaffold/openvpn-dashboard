@@ -18,6 +18,10 @@
 #   INSTALL_DIR  where the code lands (default /opt/ovpn-dashboard)
 #   REPO_URL     git remote to clone (default the public repo)
 #   REPO_REF     branch/tag to check out (default main)
+#   BIND_IP      only needed when running more than one agent on the same box (e.g.
+#                Hetzner floating IPs) -- pins this agent's OpenVPN listeners and its
+#                clients' NAT/exit traffic to exactly this address instead of the
+#                box's default one. Leave unset for the ordinary one-agent-per-box case.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -73,20 +77,11 @@ sysctl --system > /dev/null
 echo "==> Firewall: allow SSH/HTTP/HTTPS, tunnel routing between tun* and the default interface"
 default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
 default_iface="${default_iface:-eth0}"
-if ! grep -q "POSTROUTING -s 10.9" /etc/ufw/before.rules 2>/dev/null; then
-  awk -v iface="$default_iface" '
-    /^\*filter/ && !done {
-      print "*nat"
-      print ":POSTROUTING ACCEPT [0:0]"
-      print "-A POSTROUTING -s 10.9.0.0/16 -o " iface " -j MASQUERADE"
-      print "COMMIT"
-      print ""
-      done = 1
-    }
-    { print }
-  ' /etc/ufw/before.rules > /etc/ufw/before.rules.new
-  mv /etc/ufw/before.rules.new /etc/ufw/before.rules
-fi
+# NAT (POSTROUTING/MASQUERADE) is deliberately NOT set up here as one blanket rule
+# for the whole 10.9.0.0/16 range -- the agent adds/removes one specific rule per
+# endpoint at create/delete time instead (see agent/endpoints.py:_ensure_nat), and
+# re-asserts them all on every agent start. That's what makes it safe for more than
+# one agent instance to share this box, each owning only its own endpoints/subnets.
 ufw route allow in on tun+ out on "$default_iface" > /dev/null
 ufw route allow in on "$default_iface" out on tun+ > /dev/null
 ufw allow 22/tcp comment 'SSH' > /dev/null
@@ -117,9 +112,81 @@ esac
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-endpoint-ctl
 
+echo "==> NAT-control wrapper (per-endpoint POSTROUTING rule, no sudoers wildcards)"
+cat > /usr/local/bin/ovpn-nat-ctl <<'CTLEOF'
+#!/bin/bash
+# Narrow wrapper, same rationale as ovpn-endpoint-ctl. Adds/removes exactly one
+# POSTROUTING rule for one endpoint's tunnel subnet -- called by
+# agent/endpoints.py on every endpoint create/delete, and re-run for every
+# existing endpoint each time the agent starts (a ufw reload or reboot can
+# drop a runtime-only iptables rule; this makes it self-healing).
+set -euo pipefail
+action="${1:-}"    # add | remove
+subnet="${2:-}"    # e.g. 10.9.3.0/24
+mode="${3:-}"      # snat | masquerade
+target="${4:-}"    # bind IP, only used when mode=snat
+
+if ! [[ "$subnet" =~ ^10\.9\.[0-9]{1,3}\.0/24$ ]]; then
+  echo "invalid subnet" >&2
+  exit 1
+fi
+
+default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+default_iface="${default_iface:-eth0}"
+
+case "$mode" in
+  snat)
+    if ! [[ "$target" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      echo "invalid target ip" >&2
+      exit 1
+    fi
+    rule=(-s "$subnet" -o "$default_iface" -j SNAT --to-source "$target")
+    ;;
+  masquerade)
+    rule=(-s "$subnet" -o "$default_iface" -j MASQUERADE)
+    ;;
+  *)
+    echo "invalid mode: $mode" >&2
+    exit 1
+    ;;
+esac
+
+case "$action" in
+  add)
+    iptables -t nat -C POSTROUTING "${rule[@]}" 2>/dev/null || iptables -t nat -A POSTROUTING "${rule[@]}"
+    ;;
+  remove)
+    iptables -t nat -D POSTROUTING "${rule[@]}" 2>/dev/null || true
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    exit 1
+    ;;
+esac
+CTLEOF
+chmod 755 /usr/local/bin/ovpn-nat-ctl
+
+echo "==> Bind-IP wrapper (idempotently owns BIND_IP on the NIC, root-only, no sudoers grant)"
+cat > /usr/local/bin/ovpn-bind-ip-ctl <<'CTLEOF'
+#!/bin/bash
+# Ensures BIND_IP (if set in this agent's env file) is present as a /32 on the
+# default interface -- needed before OpenVPN's 'local' bind or the SNAT rule
+# in ovpn-nat-ctl can use it. No-op on ordinary single-IP boxes. Run as root
+# via the systemd unit's ExecStartPre=+ (bypasses the unit's own User=), so
+# it re-applies on every agent start including after a reboot.
+set -euo pipefail
+BIND_IP="${BIND_IP:-}"
+[ -z "$BIND_IP" ] && exit 0
+default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+default_iface="${default_iface:-eth0}"
+ip addr show dev "$default_iface" | grep -q " ${BIND_IP}/32 " || ip addr add "${BIND_IP}/32" dev "$default_iface"
+CTLEOF
+chmod 755 /usr/local/bin/ovpn-bind-ip-ctl
+
 echo "==> Sudoers: the narrow, explicit grant set the agent needs"
 cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
 SUDOEOF
@@ -140,10 +207,11 @@ venv/bin/pip install --quiet --no-cache-dir -r requirements.txt
 
 echo "==> Config"
 mkdir -p /etc/ovpn-dashboard
-cat > /etc/ovpn-dashboard/agent.env <<EOF
-HUB_URL=${HUB_URL}
-AGENT_TOKEN=${AGENT_TOKEN}
-EOF
+{
+  echo "HUB_URL=${HUB_URL}"
+  echo "AGENT_TOKEN=${AGENT_TOKEN}"
+  [ -n "${BIND_IP:-}" ] && echo "BIND_IP=${BIND_IP}" || true
+} > /etc/ovpn-dashboard/agent.env
 chmod 600 /etc/ovpn-dashboard/agent.env
 
 chown -R ovpndash:ovpndash "$INSTALL_DIR" /etc/openvpn/easy-rsa /etc/openvpn/ccd /etc/openvpn/clients /etc/openvpn/server /etc/ovpn-dashboard
@@ -161,6 +229,7 @@ User=ovpndash
 Group=ovpndash
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=/etc/ovpn-dashboard/agent.env
+ExecStartPre=+/usr/local/bin/ovpn-bind-ip-ctl
 ExecStart=${INSTALL_DIR}/venv/bin/python3 -m agent.main
 Restart=on-failure
 RestartSec=3

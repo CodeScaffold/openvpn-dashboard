@@ -8,6 +8,7 @@ User=ovpndash
 Group=ovpndash
 WorkingDirectory=/opt/ovpn-dashboard
 EnvironmentFile=/etc/ovpn-dashboard/agent.env
+ExecStartPre=+/usr/local/bin/ovpn-bind-ip-ctl
 ExecStart=/opt/ovpn-dashboard/venv/bin/python3 -m agent.main
 Restart=on-failure
 RestartSec=3

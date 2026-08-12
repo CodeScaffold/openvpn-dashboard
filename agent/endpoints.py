@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import re
 import subprocess
 import time
@@ -8,17 +9,82 @@ from . import db
 
 SERVER_DIR = Path("/etc/openvpn/server")
 NAME_RE = re.compile(r"^[a-z0-9-]{1,24}$")
-# Narrow wrapper the sudoers grant points at instead of a wildcard systemctl pattern —
+# Narrow wrappers the sudoers grants point at instead of wildcard patterns —
 # some sudo implementations (e.g. sudo-rs, default on newer Ubuntu) reject wildcards
-# embedded within a single argument like openvpn-server@*. The wrapper's own name
-# validation must stay in sync with NAME_RE above.
+# embedded within a single argument. Each wrapper's own validation must stay in sync
+# with the constants below.
 ENDPOINT_CTL = "/usr/local/bin/ovpn-endpoint-ctl"
+NAT_CTL = "/usr/local/bin/ovpn-nat-ctl"
+
+# Set when this agent shares a box with other agent instances, each pinned to its own
+# IP (e.g. Hetzner floating IPs) -- see README "Multiple exit IPs on one box". When set,
+# every endpoint this agent creates binds OpenVPN to exactly this address and NATs its
+# clients' traffic out through it, instead of the box's default address. Unset (the
+# common case, one agent per box) preserves the original single-IP behaviour untouched.
+BIND_IP = os.environ.get("BIND_IP") or None
 
 
-def is_port_free(port: int, protocol: str) -> bool:
+def _default_iface() -> str:
+    result = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True, timeout=5)
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    return "eth0"
+
+
+def is_port_free(port: int, protocol: str, bind_ip: str | None = None) -> bool:
+    """Ignores sockets bound to a different specific IP than ours -- multiple agent
+    instances sharing one box can each hold the same port on their own address (this is
+    exactly what makes putting several endpoints on 443 across floating IPs work). A
+    wildcard bind (0.0.0.0/::), ours or anyone else's, still blocks the whole port."""
     flag = "-tln" if protocol == "tcp" else "-uln"
     result = subprocess.run(["ss", flag], capture_output=True, text=True, timeout=5)
-    return f":{port} " not in result.stdout and not re.search(rf":{port}\b", result.stdout)
+    for line in result.stdout.splitlines()[1:]:
+        cols = line.split()
+        if len(cols) < 4:
+            continue
+        local_addr = cols[3]
+        addr, _, p = local_addr.rpartition(":")
+        if p != str(port):
+            continue
+        addr = addr.strip("[]")
+        if addr in ("0.0.0.0", "*", "::"):
+            return False
+        if bind_ip is None or addr == bind_ip:
+            return False
+    return True
+
+
+def _next_tun_index() -> int:
+    """Host-wide, not just this agent's own DB -- when several agent instances share a
+    box (see BIND_IP above), each starting from its own empty DB would happily pick the
+    same tun0 the others already hold. Checking live interfaces avoids that collision."""
+    existing = db.get_all_endpoints()
+    index = len(existing)
+    for row in existing:
+        index = max(index, int(row["tun_dev"].replace("tun", "")) + 1)
+
+    result = subprocess.run(["ip", "-o", "link", "show"], capture_output=True, text=True, timeout=5)
+    for m in re.finditer(r"\btun(\d+)\b", result.stdout):
+        index = max(index, int(m.group(1)) + 1)
+    return index
+
+
+def _ensure_nat(subnet: str) -> None:
+    if BIND_IP:
+        args = [NAT_CTL, "add", subnet, "snat", BIND_IP]
+    else:
+        args = [NAT_CTL, "add", subnet, "masquerade"]
+    subprocess.run(["sudo", "-n", *args], capture_output=True, text=True)
+
+
+def _remove_nat(subnet: str) -> None:
+    if BIND_IP:
+        args = [NAT_CTL, "remove", subnet, "snat", BIND_IP]
+    else:
+        args = [NAT_CTL, "remove", subnet, "masquerade"]
+    subprocess.run(["sudo", "-n", *args], capture_output=True, text=True)
 
 
 def _config_text(name: str, port: int, protocol: str, cipher: str, tun_dev: str,
@@ -28,6 +94,10 @@ def _config_text(name: str, port: int, protocol: str, cipher: str, tun_dev: str,
         f"port {port}",
         f"proto {protocol}",
         f"dev {tun_dev}",
+    ]
+    if BIND_IP:
+        lines.append(f"local {BIND_IP}")
+    lines += [
         "ca ca.crt",
         "cert server.crt",
         "key server.key",
@@ -75,15 +145,10 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
         raise ValueError("protocol must be udp or tcp.")
     if not (1 <= port <= 65535):
         raise ValueError("Invalid port.")
-    if not is_port_free(port, protocol):
+    if not is_port_free(port, protocol, BIND_IP):
         raise ValueError(f"Port {port}/{protocol} is already in use.")
 
-    existing = db.get_all_endpoints()
-    index = len(existing)
-    for row in existing:
-        idx = int(row["tun_dev"].replace("tun", ""))
-        index = max(index, idx + 1)
-
+    index = _next_tun_index()
     mgmt_port = db.next_mgmt_port()
     tun_dev = f"tun{index}"
     subnet = f"10.9.{index}.0/24"
@@ -99,6 +164,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
 
     subprocess.run(["sudo", "-n", "ufw", "allow", f"{port}/{protocol}", "comment", f"ovpn-{name}"],
                     capture_output=True, text=True)
+    _ensure_nat(subnet)
 
     result = subprocess.run(
         ["sudo", "-n", ENDPOINT_CTL, "enable-now", name],
@@ -115,6 +181,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
                         capture_output=True, text=True)
         subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{port}/{protocol}"],
                         capture_output=True, text=True)
+        _remove_nat(subnet)
         raise RuntimeError(f"OpenVPN failed to start for endpoint '{name}': {result.stderr.strip()[-400:]}")
 
     db.ensure_endpoint(name, port, protocol, cipher, mgmt_port, tun_dev, subnet, dns1, dns2, ccd_dir)
@@ -130,6 +197,7 @@ def delete_endpoint(name: str) -> None:
     (SERVER_DIR / f"{name}.conf").unlink(missing_ok=True)
     subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{row['port']}/{row['protocol']}"],
                     capture_output=True, text=True)
+    _remove_nat(row["subnet"])
 
     ccd_dir = Path(row["ccd_dir"])
     if ccd_dir.exists():
@@ -138,6 +206,16 @@ def delete_endpoint(name: str) -> None:
         ccd_dir.rmdir()
 
     db.delete_endpoint(name)
+
+
+def reconcile_nat() -> None:
+    """Called once at agent startup. A ufw reload or a reboot only reapplies what's
+    persisted in ufw's own config, which our per-endpoint rules deliberately aren't
+    part of -- so every endpoint this agent already owns gets its rule re-asserted
+    here. _ensure_nat is idempotent (checks with -C before adding), so this is cheap
+    even when nothing actually needs fixing."""
+    for row in db.get_all_endpoints():
+        _ensure_nat(row["subnet"])
 
 
 def is_active(name: str) -> bool:

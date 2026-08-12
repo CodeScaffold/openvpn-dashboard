@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.1.0 — Multiple exit IPs per box
+
+### Added
+
+- **Several independent servers can now share one physical box.** Useful for extra IPs
+  routed to a single server (e.g. Hetzner Floating IPs) — each gets its own agent
+  instance, own PKI, own entry on the Servers page, and behaves exactly like a fully
+  separate server, just co-located. Enabled with one extra install-time variable,
+  `BIND_IP` — see the README's "Multiple exit IPs on one box" section.
+- Each agent now pins its OpenVPN listeners and its clients' outbound NAT/exit traffic
+  to exactly its own IP instead of the box's default one, so several agents (and several
+  endpoints, even on the same port like 443) can coexist on one host without conflict.
+- NAT rules are now managed per-endpoint (added on create, removed on delete) instead of
+  one blanket rule for the whole box, and are automatically re-asserted every time the
+  agent starts — self-healing against a `ufw reload` or reboot dropping a runtime-only
+  `iptables` rule.
+
+### Fixed
+
+- The port-availability check before creating an endpoint no longer blocks reuse of the
+  same port on a different specific IP — only true conflicts (a wildcard bind, or the
+  exact same IP:port already in use) are rejected now.
+- The Docker agent's entrypoint only ever passed `HUB_URL`/`AGENT_TOKEN` through from
+  `docker run -e` into the container's systemd-managed services; `BIND_IP` is now passed
+  through the same way.
+- The README's Docker agent install command used `--cgroup host`, which isn't a real
+  `docker run` flag — corrected to `--cgroupns=host`.
+
 ## 2.0.0 — Multi-server
 
 The dashboard now manages **any number of OpenVPN servers from one panel**, not just the

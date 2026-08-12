@@ -224,6 +224,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
     hub_url = os.environ["HUB_URL"]
     token = os.environ["AGENT_TOKEN"]
+    try:
+        endpoints_mod.reconcile_nat()
+    except Exception:
+        log.exception("NAT reconciliation failed at startup -- continuing anyway")
     asyncio.run(run_forever(hub_url, token))
     return 0
 
