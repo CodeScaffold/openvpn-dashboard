@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.1 — Fix management-port collision on shared boxes
+
+### Fixed
+
+- When several agents share one box (`BIND_IP`, added in 2.1.0), each agent's
+  management-port allocation only checked its own local database, not the box as a
+  whole. Since OpenVPN's management socket always binds `127.0.0.1`, which every agent
+  instance sees as the same loopback, two agents both creating their first endpoint would
+  both try port 7505 and the second would fail to start ("Address already in use").
+  Allocation now probes the live host for a genuinely free port instead of trusting each
+  agent's own database in isolation — the same fix already applied to tun-device
+  numbering in 2.1.0, just missed for this one.
+
 ## 2.1.0 — Multiple exit IPs per box
 
 ### Added

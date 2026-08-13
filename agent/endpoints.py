@@ -56,6 +56,18 @@ def is_port_free(port: int, protocol: str, bind_ip: str | None = None) -> bool:
     return True
 
 
+def _next_mgmt_port() -> int:
+    """Host-wide, same reasoning as _next_tun_index -- the management socket always
+    binds 127.0.0.1, which several agent instances sharing one box (BIND_IP) all see
+    as the same loopback. Each agent's own DB has no visibility into what mgmt port
+    another instance already grabbed, so probe the live host instead of trusting
+    db.next_mgmt_port() blindly."""
+    candidate = db.next_mgmt_port()
+    while not is_port_free(candidate, "tcp", "127.0.0.1"):
+        candidate += 1
+    return candidate
+
+
 def _next_tun_index() -> int:
     """Host-wide, not just this agent's own DB -- when several agent instances share a
     box (see BIND_IP above), each starting from its own empty DB would happily pick the
@@ -149,7 +161,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
         raise ValueError(f"Port {port}/{protocol} is already in use.")
 
     index = _next_tun_index()
-    mgmt_port = db.next_mgmt_port()
+    mgmt_port = _next_mgmt_port()
     tun_dev = f"tun{index}"
     subnet = f"10.9.{index}.0/24"
     ccd_dir = f"/etc/openvpn/ccd/{name}"
