@@ -3,7 +3,14 @@
 # unchanged, identically to a bare-metal install — see agent-first-boot.sh
 # for the one-time setup that replaces agent/install.sh's steps. Build
 # context is the repo root: docker build -f docker/agent.Dockerfile .
-FROM ubuntu:24.04
+#
+# 26.04, not 24.04: OpenVPN's kernel data channel offload (DCO) needs a recent
+# enough userspace OpenVPN to negotiate with the host's in-kernel `ovpn` module
+# over netlink -- 24.04's OpenVPN 2.6.19 silently falls back to slow userspace
+# packet processing even when the host kernel has the module loaded (same
+# kernel, since this runs --network host), while 26.04's 2.7.0 works. This is
+# a large, measured difference -- roughly 3x throughput on real hardware.
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 

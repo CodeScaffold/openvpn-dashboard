@@ -159,6 +159,7 @@ async def _telemetry_loop(ws, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         await asyncio.sleep(poller.INTERVAL_SECONDS)
         try:
+            await asyncio.to_thread(endpoints_mod.ensure_bind_ip)
             await asyncio.to_thread(system.sample)
             result = await asyncio.to_thread(poller.reconcile)
             for event_name, message in result.events:
@@ -224,6 +225,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
     hub_url = os.environ["HUB_URL"]
     token = os.environ["AGENT_TOKEN"]
+    try:
+        endpoints_mod.reconcile_endpoints()
+    except Exception:
+        log.exception("Endpoint reconciliation failed at startup -- continuing anyway")
     try:
         endpoints_mod.reconcile_nat()
     except Exception:

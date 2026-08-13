@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.1.2 — BIND_IP persistence, self-heal, and a default swapfile
+
+### Fixed
+
+- **`BIND_IP` addresses could silently disappear.** They were only ever added
+  imperatively (`ip addr add`) — fine at the moment the agent starts, but a box that
+  manages its interface via DHCP (netplan/systemd-networkd, the Ubuntu default) can
+  reconcile the interface back to its own declared config on the next lease renewal,
+  dropping anything added outside of it. The next OpenVPN restart, or the next endpoint
+  created on that IP, would then fail to bind with "Cannot assign requested address."
+  The README's "Multiple exit IPs on one box" section now leads with the actual fix —
+  add the IP to the box's own persistent network config (a netplan example is included)
+  — and the agent additionally re-checks and re-adds it every ~15s on its own as a
+  fallback for whenever that drifts anyway, rather than only at agent startup.
+
+### Added
+
+- **Bare-metal installs now create a 2G swapfile by default** if the box has none
+  (`SWAP_GB=0` to skip, or just delete `/swapfile` afterward if you change your mind) —
+  cheap insurance against an OOM kill on a small VPS.
+- **The Docker agent image is now built on Ubuntu 26.04, not 24.04.** OpenVPN's kernel
+  data channel offload (DCO) needs a recent enough userspace OpenVPN to negotiate with
+  the host's in-kernel `ovpn` module — 24.04 ships OpenVPN 2.6.19, which silently falls
+  back to slow userspace packet processing even when the host kernel has DCO available
+  (the container shares the host's kernel under `--network host`), while 26.04's 2.7.0
+  works. Measured close to 3x higher throughput after rebuilding on 26.04. If you're on
+  bare metal, the same applies — use a distro/kernel recent enough to have the `ovpn`
+  kernel module (`modinfo ovpn`) for the same improvement.
+- **Endpoints now restart themselves if they were already configured but not running**,
+  checked once at every agent startup. A Docker container's own "this unit starts on
+  boot" state doesn't survive the container being recreated (the config file on the
+  persistent volume does, but the systemd enablement symlink doesn't) — so something as
+  ordinary as an image update could otherwise leave a real, already-working endpoint
+  silently offline until someone happened to notice.
+
 ## 2.1.1 — Fix management-port collision on shared boxes
 
 ### Fixed

@@ -22,6 +22,9 @@
 #                Hetzner floating IPs) -- pins this agent's OpenVPN listeners and its
 #                clients' NAT/exit traffic to exactly this address instead of the
 #                box's default one. Leave unset for the ordinary one-agent-per-box case.
+#   SWAP_GB      size of a swapfile to create if this box has none (default 2). Cheap
+#                insurance against an OOM kill on a small VPS. Set to 0 to skip, or just
+#                delete /swapfile and its /etc/fstab line afterward if you change your mind.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -73,6 +76,20 @@ fi
 echo "==> Enabling IP forwarding"
 echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
 sysctl --system > /dev/null
+
+SWAP_GB="${SWAP_GB:-2}"
+if [[ "$SWAP_GB" != "0" && -z "$(swapon --show 2>/dev/null)" ]]; then
+  echo "==> Adding a ${SWAP_GB}G swapfile (SWAP_GB=0 to skip; delete /swapfile afterward to remove it)"
+  fallocate -l "${SWAP_GB}G" /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile > /dev/null
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
+  sysctl --system > /dev/null
+else
+  echo "==> Swap already present or SWAP_GB=0 -- leaving it alone"
+fi
 
 echo "==> Firewall: allow SSH/HTTP/HTTPS, tunnel routing between tun* and the default interface"
 default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
@@ -166,16 +183,23 @@ esac
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-nat-ctl
 
-echo "==> Bind-IP wrapper (idempotently owns BIND_IP on the NIC, root-only, no sudoers grant)"
+echo "==> Bind-IP wrapper (idempotently owns BIND_IP on the NIC)"
 cat > /usr/local/bin/ovpn-bind-ip-ctl <<'CTLEOF'
 #!/bin/bash
-# Ensures BIND_IP (if set in this agent's env file) is present as a /32 on the
-# default interface -- needed before OpenVPN's 'local' bind or the SNAT rule
-# in ovpn-nat-ctl can use it. No-op on ordinary single-IP boxes. Run as root
-# via the systemd unit's ExecStartPre=+ (bypasses the unit's own User=), so
-# it re-applies on every agent start including after a reboot.
+# Ensures BIND_IP is present as a /32 on the default interface -- needed before
+# OpenVPN's 'local' bind or the SNAT rule in ovpn-nat-ctl can use it. No-op if
+# unset. Takes the IP as $1 if given (how the agent calls it, to self-heal
+# periodically without depending on env passthrough through sudo), else falls
+# back to $BIND_IP from the environment (how the systemd unit's ExecStartPre=+
+# calls it at every agent start, via EnvironmentFile=).
+#
+# This alone is NOT a persistent fix -- a box that manages its interface via
+# DHCP (netplan/systemd-networkd) can silently drop an address that isn't part
+# of its own declared config on the next lease renewal. The real fix is adding
+# the IP there too; see the README's "Multiple exit IPs on one box" section.
+# This script is the belt-and-suspenders fallback for whenever that drifts.
 set -euo pipefail
-BIND_IP="${BIND_IP:-}"
+BIND_IP="${1:-${BIND_IP:-}}"
 [ -z "$BIND_IP" ] && exit 0
 default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
 default_iface="${default_iface:-eth0}"
@@ -187,6 +211,7 @@ echo "==> Sudoers: the narrow, explicit grant set the agent needs"
 cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-bind-ip-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
 ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
 SUDOEOF

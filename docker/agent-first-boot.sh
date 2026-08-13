@@ -87,27 +87,32 @@ esac
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-nat-ctl
 
-cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
-ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
-ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
-ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
-ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
-SUDOEOF
-chmod 440 /etc/sudoers.d/ovpndash
-
 # ovpn-agent.service references this via ExecStartPre=+ (see docker/ovpn-agent.service,
 # shared verbatim with the bare-metal install) -- must exist even when BIND_IP is unset
-# on this particular container, or that ExecStartPre fails with 203/EXEC.
+# on this particular container, or that ExecStartPre fails with 203/EXEC. The agent
+# process also calls it directly (via sudo, with the IP as an argument) periodically to
+# self-heal -- see agent/endpoints.py:ensure_bind_ip. Not a substitute for adding the IP
+# to the box's own persistent network config; see the README's "Multiple exit IPs on one
+# box" section for why that's still required.
 cat > /usr/local/bin/ovpn-bind-ip-ctl <<'CTLEOF'
 #!/bin/bash
 set -euo pipefail
-BIND_IP="${BIND_IP:-}"
+BIND_IP="${1:-${BIND_IP:-}}"
 [ -z "$BIND_IP" ] && exit 0
 default_iface="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
 default_iface="${default_iface:-eth0}"
 ip addr show dev "$default_iface" | grep -q " ${BIND_IP}/32 " || ip addr add "${BIND_IP}/32" dev "$default_iface"
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-bind-ip-ctl
+
+cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-bind-ip-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
+ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
+SUDOEOF
+chmod 440 /etc/sudoers.d/ovpndash
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 

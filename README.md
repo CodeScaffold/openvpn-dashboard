@@ -90,8 +90,43 @@ physical box. Repeat steps 2–3 above once per IP, and on step 3 add one more v
 (`sudo BIND_IP=<that IP> HUB_URL=... AGENT_TOKEN=... bash` for the non-Docker installer.)
 That pins the agent's OpenVPN listeners and its clients' outbound NAT to exactly that
 address — not the box's default one — so several agents can share a host, each answering
-only on its own IP, even on the same port. First add the IP to the box itself (e.g. a
-Hetzner Floating IP assigned in its Cloud Console), then install each agent as usual.
+only on its own IP, even on the same port.
+
+**Add the IP to the box's own persistent network config first — this step is required,
+not optional.** A Hetzner Floating IP (or similar) assigned in a Cloud Console is *routed*
+to the box, but nothing puts it on the network interface until you do. Running `ip addr
+add` by hand (or relying only on the agent's own bookkeeping) is not enough either: on a
+box that manages its interface via DHCP (netplan/systemd-networkd, the default on Ubuntu),
+the next lease renewal reconciles the interface back to whatever's in netplan's own
+config and silently drops anything added outside of it — possibly hours after the agent
+started, with no warning beyond OpenVPN failing to bind the next time it (re)starts.
+
+Add it as a static address on the same interface, in its own file so a `cloud-init` rerun
+doesn't wipe it:
+
+```yaml
+# /etc/netplan/60-ovpn-floating-ips.yaml
+network:
+  version: 2
+  ethernets:
+    eth0:                      # match your actual interface name
+      match:
+        macaddress: "..."      # copy from your existing netplan config
+      set-name: "eth0"
+      addresses:
+      - 203.0.113.5/32         # one line per floating IP on this box
+```
+
+```bash
+netplan generate && netplan apply
+```
+
+*Not on Ubuntu/netplan?* Add the IP as a static address on the interface using whatever
+your distro's network manager provides (`systemd-networkd` `.network` file directly,
+`NetworkManager` connection profile, etc.) — the goal is the same either way: the address
+has to be part of the box's own declared network state, not just imperatively assigned
+once. The agent's `ovpn-bind-ip-ctl` also re-checks and re-adds the address on its own
+periodically as a fallback, but that's a safety net for drift, not a substitute for this.
 
 Not interested in Docker? Same install, done by hand — expand below.
 

@@ -15,6 +15,7 @@ NAME_RE = re.compile(r"^[a-z0-9-]{1,24}$")
 # with the constants below.
 ENDPOINT_CTL = "/usr/local/bin/ovpn-endpoint-ctl"
 NAT_CTL = "/usr/local/bin/ovpn-nat-ctl"
+BIND_IP_CTL = "/usr/local/bin/ovpn-bind-ip-ctl"
 
 # Set when this agent shares a box with other agent instances, each pinned to its own
 # IP (e.g. Hetzner floating IPs) -- see README "Multiple exit IPs on one box". When set,
@@ -228,6 +229,35 @@ def reconcile_nat() -> None:
     even when nothing actually needs fixing."""
     for row in db.get_all_endpoints():
         _ensure_nat(row["subnet"])
+
+
+def reconcile_endpoints() -> None:
+    """Called once at agent startup, alongside reconcile_nat. The endpoint's config
+    file lives on a persistent volume/disk and survives fine, but systemd's "this
+    unit is enabled" symlink does not survive a Docker container being recreated
+    (a fresh container gets a fresh root filesystem layer) -- so a real, already
+    -configured endpoint can end up silently stopped after something as ordinary as
+    an image update, until this notices and starts it back up."""
+    for row in db.get_all_endpoints():
+        name = row["name"]
+        active = subprocess.run(
+            ["systemctl", "is-active", f"openvpn-server@{name}"], capture_output=True, text=True
+        ).stdout.strip()
+        if active != "active":
+            subprocess.run(["sudo", "-n", ENDPOINT_CTL, "enable-now", name], capture_output=True, text=True)
+
+
+def ensure_bind_ip() -> None:
+    """Self-heal, called periodically from the agent's telemetry loop, not just at
+    startup. The persistent fix for BIND_IP is adding it to the box's own network
+    config (netplan/etc -- see README); this exists because a box that manages its
+    interface via DHCP can still silently drop an address that was only ever added
+    imperatively (a lease renewal reconciles the interface back to its declared
+    config), and that can happen hours after the agent last started. ovpn-bind-ip-ctl
+    is idempotent, so calling this often is cheap."""
+    if not BIND_IP:
+        return
+    subprocess.run(["sudo", "-n", BIND_IP_CTL, BIND_IP], capture_output=True, text=True)
 
 
 def is_active(name: str) -> bool:
