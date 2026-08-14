@@ -16,6 +16,7 @@ NAME_RE = re.compile(r"^[a-z0-9-]{1,24}$")
 ENDPOINT_CTL = "/usr/local/bin/ovpn-endpoint-ctl"
 NAT_CTL = "/usr/local/bin/ovpn-nat-ctl"
 BIND_IP_CTL = "/usr/local/bin/ovpn-bind-ip-ctl"
+FW_CTL = "/usr/local/bin/ovpn-fw-ctl"
 
 # Set when this agent shares a box with other agent instances, each pinned to its own
 # IP (e.g. Hetzner floating IPs) -- see README "Multiple exit IPs on one box". When set,
@@ -82,6 +83,14 @@ def _next_tun_index() -> int:
     for m in re.finditer(r"\btun(\d+)\b", result.stdout):
         index = max(index, int(m.group(1)) + 1)
     return index
+
+
+def _open_port(port: int, protocol: str) -> None:
+    subprocess.run(["sudo", "-n", FW_CTL, "add", str(port), protocol], capture_output=True, text=True)
+
+
+def _close_port(port: int, protocol: str) -> None:
+    subprocess.run(["sudo", "-n", FW_CTL, "remove", str(port), protocol], capture_output=True, text=True)
 
 
 def _ensure_nat(subnet: str) -> None:
@@ -175,8 +184,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
         _config_text(name, port, protocol, cipher, tun_dev, subnet, dns1, dns2, mgmt_port, ccd_dir)
     )
 
-    subprocess.run(["sudo", "-n", "ufw", "allow", f"{port}/{protocol}", "comment", f"ovpn-{name}"],
-                    capture_output=True, text=True)
+    _open_port(port, protocol)
     _ensure_nat(subnet)
 
     result = subprocess.run(
@@ -192,8 +200,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
         conf_path.unlink(missing_ok=True)
         subprocess.run(["sudo", "-n", ENDPOINT_CTL, "disable", name],
                         capture_output=True, text=True)
-        subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{port}/{protocol}"],
-                        capture_output=True, text=True)
+        _close_port(port, protocol)
         _remove_nat(subnet)
         raise RuntimeError(f"OpenVPN failed to start for endpoint '{name}': {result.stderr.strip()[-400:]}")
 
@@ -208,8 +215,7 @@ def delete_endpoint(name: str) -> None:
     subprocess.run(["sudo", "-n", ENDPOINT_CTL, "disable-now", name],
                     capture_output=True, text=True)
     (SERVER_DIR / f"{name}.conf").unlink(missing_ok=True)
-    subprocess.run(["sudo", "-n", "ufw", "delete", "allow", f"{row['port']}/{row['protocol']}"],
-                    capture_output=True, text=True)
+    _close_port(row["port"], row["protocol"])
     _remove_nat(row["subnet"])
 
     ccd_dir = Path(row["ccd_dir"])
@@ -229,6 +235,13 @@ def reconcile_nat() -> None:
     even when nothing actually needs fixing."""
     for row in db.get_all_endpoints():
         _ensure_nat(row["subnet"])
+
+
+def reconcile_ports() -> None:
+    """Called once at agent startup, same reasoning as reconcile_nat -- a reboot clears
+    the raw iptables rule ovpn-fw-ctl adds, so every endpoint's port gets re-opened."""
+    for row in db.get_all_endpoints():
+        _open_port(row["port"], row["protocol"])
 
 
 def reconcile_endpoints() -> None:

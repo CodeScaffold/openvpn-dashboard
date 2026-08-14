@@ -207,13 +207,55 @@ ip addr show dev "$default_iface" | grep -q " ${BIND_IP}/32 " || ip addr add "${
 CTLEOF
 chmod 755 /usr/local/bin/ovpn-bind-ip-ctl
 
+echo "==> Firewall wrapper (raw iptables, not ufw -- see rationale in the script itself)"
+cat > /usr/local/bin/ovpn-fw-ctl <<'CTLEOF'
+#!/bin/bash
+# Opens/closes exactly one inbound port. Deliberately bypasses ufw's own allow/delete
+# commands: ufw tracks "what's already allowed" in a rule file, and when several agent
+# instances share one box (BIND_IP) each keeps its own separate copy of that file even
+# though they're all managing the *same* underlying kernel firewall table -- so one
+# instance's ufw can genuinely believe a port is already open (and silently skip
+# re-adding it) when the live table doesn't have it at all. Inserting directly into
+# INPUT sidesteps that class of bug entirely, and works whether ufw is enabled or not.
+set -euo pipefail
+action="${1:-}"    # add | remove
+port="${2:-}"
+proto="${3:-}"     # tcp | udp
+
+if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || (( port < 1 || port > 65535 )); then
+  echo "invalid port" >&2
+  exit 1
+fi
+if [[ "$proto" != "tcp" && "$proto" != "udp" ]]; then
+  echo "invalid protocol: $proto" >&2
+  exit 1
+fi
+
+case "$action" in
+  add)
+    iptables -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || \
+    iptables -I INPUT 1 -p "$proto" --dport "$port" -j ACCEPT
+    ip6tables -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || \
+    ip6tables -I INPUT 1 -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+    ;;
+  remove)
+    iptables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+    ip6tables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    exit 1
+    ;;
+esac
+CTLEOF
+chmod 755 /usr/local/bin/ovpn-fw-ctl
+
 echo "==> Sudoers: the narrow, explicit grant set the agent needs"
 cat > /etc/sudoers.d/ovpndash <<'SUDOEOF'
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-bind-ip-ctl
-ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
-ovpndash ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow *
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-fw-ctl
 SUDOEOF
 visudo -c -f /etc/sudoers.d/ovpndash
 chmod 440 /etc/sudoers.d/ovpndash

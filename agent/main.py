@@ -233,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
         endpoints_mod.reconcile_nat()
     except Exception:
         log.exception("NAT reconciliation failed at startup -- continuing anyway")
+    try:
+        endpoints_mod.reconcile_ports()
+    except Exception:
+        log.exception("Port reconciliation failed at startup -- continuing anyway")
     asyncio.run(run_forever(hub_url, token))
     return 0
 
