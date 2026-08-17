@@ -70,9 +70,18 @@ def _migration_2(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE client_limits ADD COLUMN team TEXT")
 
 
+def _migration_3(conn: sqlite3.Connection) -> None:
+    """Display label, independent of the client's name (== cert CN). Renaming
+    a client for real means revoking and reissuing its certificate, which
+    breaks any .ovpn already handed out -- a label lets admins give a client
+    a human-friendly name without touching the cert at all."""
+    conn.execute("ALTER TABLE client_limits ADD COLUMN label TEXT")
+
+
 MIGRATIONS = [
     (1, "base schema", _migration_1),
     (2, "pinned static ips + team", _migration_2),
+    (3, "client display label", _migration_3),
 ]
 
 
@@ -114,6 +123,7 @@ def update_limits(
     bandwidth_kbps: int | None = "unset",
     disabled: int | None = None,
     team: str | None = "unset",
+    label: str | None = "unset",
 ) -> None:
     ensure_client_row(name)
     conn = get_conn()
@@ -134,6 +144,9 @@ def update_limits(
     if team != "unset":
         fields.append("team = ?")
         values.append(team)
+    if label != "unset":
+        fields.append("label = ?")
+        values.append(label)
     if not fields:
         return
     values.append(name)

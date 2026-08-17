@@ -1063,6 +1063,7 @@
   const limitsQuota = document.getElementById("limits-quota");
   const limitsBandwidth = document.getElementById("limits-bandwidth");
   const limitsTeam = document.getElementById("limits-team");
+  const limitsLabel = document.getElementById("limits-label");
   const limitsUsage = document.getElementById("limits-usage");
   const limitsError = document.getElementById("limits-error");
   const limitsCancel = document.getElementById("limits-cancel");
@@ -1114,8 +1115,9 @@
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.innerHTML = `<span class="client-name"></span>${c.disabled ? '<span class="badge-disabled">quota exceeded</span>' : ""}`;
-      nameTd.querySelector(".client-name").textContent = c.name;
+      nameTd.innerHTML = `<span class="client-name"></span>${c.label ? '<span class="client-name-sub" style="display:block;font-size:0.75rem;color:var(--text-muted)"></span>' : ""}${c.disabled ? '<span class="badge-disabled">quota exceeded</span>' : ""}`;
+      nameTd.querySelector(".client-name").textContent = c.label || c.name;
+      if (c.label) nameTd.querySelector(".client-name-sub").textContent = c.name;
       tr.appendChild(nameTd);
 
       const teamTd = document.createElement("td");
@@ -1287,11 +1289,12 @@
 
   async function openLimits(client) {
     pendingLimitsClient = client;
-    limitsTarget.textContent = `"${client.name}"`;
+    limitsTarget.textContent = `"${client.label || client.name}"`;
     limitsMaxConn.value = client.max_connections;
     limitsQuota.value = client.quota_bytes ? (client.quota_bytes / 1_000_000_000).toString() : "";
     limitsBandwidth.value = client.bandwidth_kbps ? (client.bandwidth_kbps / 1000).toString() : "";
     limitsTeam.value = client.team || "";
+    limitsLabel.value = client.label || "";
     limitsUsage.textContent = client.quota_bytes
       ? `Used so far: ${formatBytes(client.used_bytes)} of ${formatBytes(client.quota_bytes)}${client.disabled ? " — currently blocked (quota exceeded)" : ""}`
       : `Used so far: ${formatBytes(client.used_bytes)} (no cap set)`;
@@ -1338,6 +1341,7 @@
       quota_gb: limitsQuota.value ? parseFloat(limitsQuota.value) : null,
       bandwidth_mbps: limitsBandwidth.value ? parseFloat(limitsBandwidth.value) : null,
       team: limitsTeam.value.trim() || null,
+      label: limitsLabel.value.trim() || null,
     };
     setBusy(limitsSubmit, true);
     try {

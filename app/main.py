@@ -128,6 +128,7 @@ class LimitsBody(BaseModel):
     quota_gb: float | None = None
     bandwidth_mbps: float | None = None
     team: str | None = None
+    label: str | None = None
 
 
 class SetStaticIpBody(BaseModel):
@@ -506,6 +507,8 @@ async def set_client_limits(server_id: int, name: str, body: LimitsBody, request
     }
     if body.team is not None:
         data["team"] = body.team
+    if body.label is not None:
+        data["label"] = body.label
     return await _call(server_id, "client.limits", data)
 
 

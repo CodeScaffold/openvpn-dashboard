@@ -51,6 +51,7 @@ def client_view(name: str, expires: str | None = None) -> dict:
         "bandwidth_kbps": row["bandwidth_kbps"],
         "disabled": bool(row["disabled"]),
         "team": row["team"],
+        "label": row["label"],
         "static_ips": {ep: {"static_ip": ip, "pinned": pins.get(ep, False)} for ep, ip in ips.items()},
     }
 
@@ -232,6 +233,8 @@ def op_client_limits(data: dict) -> dict:
     apply_limits(name, max_connections, quota_gb, bandwidth_mbps)
     if "team" in data:
         db.update_limits(name, team=data["team"])
+    if "label" in data:
+        db.update_limits(name, label=data["label"])
     return client_view(name)
 
 
