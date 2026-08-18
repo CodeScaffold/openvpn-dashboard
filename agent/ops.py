@@ -150,6 +150,8 @@ def op_client_create(data: dict) -> dict:
         apply_limits(name, max_connections, quota_gb, bandwidth_mbps)
     if "team" in data:
         db.update_limits(name, team=data["team"])
+    if "label" in data:
+        db.update_limits(name, label=data["label"])
 
     return client_view(name)
 

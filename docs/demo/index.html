@@ -274,7 +274,12 @@
       <div class="page-body" id="endpoints-body">
       <div class="page-head">
         <h1>Endpoints</h1>
-        <button class="btn btn--primary" id="open-create-endpoint">+ Create endpoint</button>
+        <div class="page-head-actions">
+          <button class="btn btn--ghost" id="endpoints-export">Export CSV</button>
+          <button class="btn btn--ghost" id="endpoints-import-open">Import CSV</button>
+          <input id="endpoints-import-file" type="file" accept=".csv" hidden>
+          <button class="btn btn--primary" id="open-create-endpoint">+ Create endpoint</button>
+        </div>
       </div>
       <p class="page-sub">Each endpoint is its own independent OpenVPN listener with its own port, protocol, and cipher &mdash; add one on port 443/TCP to blend in as ordinary HTTPS, or spread clients across a few for redundancy. Every client can connect through any endpoint you create.</p>
 
@@ -293,7 +298,12 @@
       <div class="page-body" id="clients-body">
       <div class="page-head">
         <h1>Clients</h1>
-        <button class="btn btn--primary" id="open-create-client">+ Create client</button>
+        <div class="page-head-actions">
+          <button class="btn btn--ghost" id="clients-export">Export CSV</button>
+          <button class="btn btn--ghost" id="clients-import-open">Import CSV</button>
+          <input id="clients-import-file" type="file" accept=".csv" hidden>
+          <button class="btn btn--primary" id="open-create-client">+ Create client</button>
+        </div>
       </div>
       <p class="page-sub">Each client is a separate certificate someone can install on a device. Set a connection cap, data quota, or bandwidth limit per person, and download a ready-to-import <code>.ovpn</code> profile the moment they're created.</p>
 

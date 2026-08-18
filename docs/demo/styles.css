@@ -259,6 +259,7 @@ select:focus-visible {
 .page[hidden] { display: none !important; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-head h1 { font-size: 1.4rem; }
+.page-head-actions { display: flex; align-items: center; gap: 8px; }
 .page-sub { color: var(--text-muted); font-size: 0.92rem; line-height: 1.5; margin: 0; max-width: 640px; }
 
 .status-pill {

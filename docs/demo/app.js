@@ -55,6 +55,42 @@
     return new Date(unixSeconds * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
+  // ---------- CSV export / import (clients, endpoints) ----------
+
+  async function downloadCsv(path, filename) {
+    try {
+      const res = await api(path);
+      if (!res.ok) { showToast("Export failed.", "error"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch { showToast("Couldn't reach the server.", "error"); }
+  }
+
+  async function uploadCsv(path, file, onDone) {
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch(path, { method: "POST", credentials: "same-origin", body: fd });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.detail || "Import failed.", "error"); return; }
+      const { created = [], updated = [], skipped = [], failed = [] } = body;
+      const parts = [];
+      if (created.length) parts.push(`${created.length} created`);
+      if (updated.length) parts.push(`${updated.length} updated`);
+      if (skipped.length) parts.push(`${skipped.length} skipped (already exist)`);
+      if (failed.length) parts.push(`${failed.length} failed (${failed[0].name}: ${failed[0].error})`);
+      showToast(parts.join(", ") || "Nothing to import.", failed.length && !created.length && !updated.length ? "error" : "ok");
+      onDone();
+    } catch { showToast("Couldn't reach the server.", "error"); }
+  }
+
   // ---------- validity period picker (preset months/years, or an explicit date) ----------
 
   const VALIDITY_PRESETS = ["30", "90", "180", "365", "730", "1825"];
@@ -973,6 +1009,17 @@
   }
   document.getElementById("config-close").addEventListener("click", () => configDialog.close());
 
+  document.getElementById("endpoints-export").addEventListener("click", () => {
+    downloadCsv(serverPath("/endpoints/export"), `endpoints-${currentServerId}.csv`);
+  });
+  const endpointsImportFile = document.getElementById("endpoints-import-file");
+  document.getElementById("endpoints-import-open").addEventListener("click", () => endpointsImportFile.click());
+  endpointsImportFile.addEventListener("change", async () => {
+    if (!endpointsImportFile.files.length) return;
+    await uploadCsv(serverPath("/endpoints/import"), endpointsImportFile.files[0], loadEndpoints);
+    endpointsImportFile.value = "";
+  });
+
   document.getElementById("open-create-endpoint").addEventListener("click", () => {
     endpointForm.reset();
     document.getElementById("ep-port").value = 1194;
@@ -1201,6 +1248,17 @@
   }
 
   // ---------- create client ----------
+
+  document.getElementById("clients-export").addEventListener("click", () => {
+    downloadCsv(serverPath("/clients/export"), `clients-${currentServerId}.csv`);
+  });
+  const clientsImportFile = document.getElementById("clients-import-file");
+  document.getElementById("clients-import-open").addEventListener("click", () => clientsImportFile.click());
+  clientsImportFile.addEventListener("change", async () => {
+    if (!clientsImportFile.files.length) return;
+    await uploadCsv(serverPath("/clients/import"), clientsImportFile.files[0], loadClients);
+    clientsImportFile.value = "";
+  });
 
   document.getElementById("open-create-client").addEventListener("click", async () => {
     clientForm.reset();

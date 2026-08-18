@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import csv
 import hashlib
 import hmac
+import io
 import os
 import re
 import secrets
@@ -13,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, UploadFile, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -101,6 +103,18 @@ async def _call(server_id: int, op: str, data: dict | None = None) -> dict:
         raise HTTPException(status_code=ERROR_STATUS.get(e.code, 400), detail=str(e))
 
 
+def _csv_rows(text: str) -> csv.DictReader:
+    """Numbers/Excel export CSV with a locale-dependent delimiter -- e.g. Numbers on a
+    machine set to a comma-decimal locale writes ';' instead of ','. Sniff it instead of
+    assuming ',', or every row silently fails to parse (the whole line becomes one
+    unrecognized column) with no visible error."""
+    try:
+        dialect = csv.Sniffer().sniff(text.splitlines()[0], delimiters=",;\t")
+    except (csv.Error, IndexError):
+        dialect = csv.excel
+    return csv.DictReader(io.StringIO(text), dialect=dialect)
+
+
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=60 * 60 * 12, same_site="lax")
 
@@ -121,6 +135,7 @@ class CreateClientBody(BaseModel):
     bandwidth_mbps: float | None = None
     validity_days: int | None = None  # None = fall back to the saved client-default template
     team: str | None = None
+    label: str | None = None
 
 
 class LimitsBody(BaseModel):
@@ -463,8 +478,79 @@ async def create_client(server_id: int, body: CreateClientBody, request: Request
     }
     if body.team is not None:
         data["team"] = body.team
+    if body.label is not None:
+        data["label"] = body.label
     result = await _call(server_id, "client.create", data)
     return result
+
+
+@app.get("/api/servers/{server_id}/clients/export")
+async def export_clients(server_id: int, request: Request):
+    require_auth(request)
+    _require_server(server_id)
+    result = await _call(server_id, "client.list")
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["name", "label", "team", "max_connections", "quota_gb", "bandwidth_mbps", "validity_days"])
+    for c in result["clients"]:
+        quota_gb = c["quota_bytes"] / 1_000_000_000 if c.get("quota_bytes") else ""
+        bandwidth_mbps = c["bandwidth_kbps"] / 1000 if c.get("bandwidth_kbps") else ""
+        validity_days = ""
+        if c.get("created") and c.get("expires"):
+            try:
+                validity_days = (datetime.fromisoformat(c["expires"]) - datetime.fromisoformat(c["created"])).days
+            except ValueError:
+                pass
+        writer.writerow([
+            c["name"], c.get("label") or "", c.get("team") or "",
+            c["max_connections"], quota_gb, bandwidth_mbps, validity_days,
+        ])
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="clients-{server_id}.csv"'},
+    )
+
+
+@app.post("/api/servers/{server_id}/clients/import")
+async def import_clients(server_id: int, request: Request, file: UploadFile):
+    """Upsert by name: a row whose name doesn't exist yet issues a new cert
+    (client.create); a row matching an existing client updates its limits/
+    label/team in place (client.limits) rather than failing on conflict --
+    that's what makes "export, edit in a spreadsheet, re-import" work as a
+    bulk-edit flow instead of only being useful for bulk-creation once."""
+    require_auth(request)
+    _require_server(server_id)
+    cfg = settings.load()
+    text = (await file.read()).decode("utf-8-sig")
+    created, updated, failed = [], [], []
+    for row in _csv_rows(text):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        limits = {
+            "name": name,
+            "max_connections": int(row["max_connections"]) if row.get("max_connections") else 1,
+            "quota_gb": float(row["quota_gb"]) if row.get("quota_gb") else None,
+            "bandwidth_mbps": float(row["bandwidth_mbps"]) if row.get("bandwidth_mbps") else None,
+        }
+        if row.get("team"):
+            limits["team"] = row["team"]
+        if row.get("label"):
+            limits["label"] = row["label"]
+        try:
+            create_data = dict(limits, validity_days=int(row["validity_days"]) if row.get("validity_days") else cfg["client_default_validity_days"])
+            await _call(server_id, "client.create", create_data)
+            created.append(name)
+        except HTTPException as e:
+            if e.status_code != 409:
+                failed.append({"name": name, "error": str(e.detail)})
+                continue
+            try:
+                await _call(server_id, "client.limits", limits)
+                updated.append(name)
+            except HTTPException as e2:
+                failed.append({"name": name, "error": str(e2.detail)})
+    return {"created": created, "updated": updated, "failed": failed}
 
 
 @app.get("/api/servers/{server_id}/clients/{name}/download")
@@ -578,6 +664,51 @@ async def create_endpoint(server_id: int, body: CreateEndpointBody, request: Req
         "name": body.name, "port": body.port, "protocol": body.protocol,
         "cipher": body.cipher, "dns1": body.dns1, "dns2": body.dns2,
     })
+
+
+@app.get("/api/servers/{server_id}/endpoints/export")
+async def export_endpoints(server_id: int, request: Request):
+    require_auth(request)
+    _require_server(server_id)
+    result = await _call(server_id, "endpoint.list")
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["name", "port", "protocol", "cipher", "dns1", "dns2"])
+    for ep in result["endpoints"]:
+        writer.writerow([ep["name"], ep["port"], ep["protocol"], ep["cipher"], ep.get("dns1") or "", ep.get("dns2") or ""])
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="endpoints-{server_id}.csv"'},
+    )
+
+
+@app.post("/api/servers/{server_id}/endpoints/import")
+async def import_endpoints(server_id: int, request: Request, file: UploadFile):
+    require_auth(request)
+    _require_server(server_id)
+    text = (await file.read()).decode("utf-8-sig")
+    created, skipped, failed = [], [], []
+    for row in _csv_rows(text):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        data = {
+            "name": name,
+            "port": int(row["port"]),
+            "protocol": (row.get("protocol") or "").strip().lower(),
+            "cipher": (row.get("cipher") or "AES-128-GCM").strip(),
+            "dns1": (row.get("dns1") or "1.1.1.1").strip(),
+            "dns2": (row.get("dns2") or "1.0.0.1").strip(),
+        }
+        try:
+            await _call(server_id, "endpoint.create", data)
+            created.append(name)
+        except HTTPException as e:
+            # An endpoint's port/protocol are its identity -- unlike clients there's no
+            # non-destructive "update" to fall back to, so a name that already exists is
+            # left untouched rather than reported as a failure on re-import.
+            (skipped if e.status_code == 409 else failed).append({"name": name, "error": str(e.detail)})
+    return {"created": created, "skipped": skipped, "failed": failed}
 
 
 @app.delete("/api/servers/{server_id}/endpoints/{name}")

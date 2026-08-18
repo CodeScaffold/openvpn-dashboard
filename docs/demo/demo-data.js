@@ -195,6 +195,11 @@
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   }
 
+  function csvResponse(rows) {
+    const text = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    return new Response(text, { status: 200, headers: { "Content-Type": "text/csv" } });
+  }
+
   window.fetch = async (url, opts = {}) => {
     const path = new URL(url, location.href).pathname.replace(/^.*\/(api\/.*)$/, "/$1");
     const method = (opts.method || "GET").toUpperCase();
@@ -265,6 +270,25 @@
     if (method === "GET" && rest === "/endpoints") {
       const views = endpoints.map((e) => endpointView(e, clients));
       return jsonResponse(server.online ? views : views.map((v) => ({ ...v, stale: true })));
+    }
+    if (method === "GET" && rest === "/clients/export") {
+      const days = (c) => Math.round((new Date(c.expires) - new Date(c.created)) / 86400000);
+      return csvResponse([
+        ["name", "label", "team", "max_connections", "quota_gb", "bandwidth_mbps", "validity_days"],
+        ...clients.map((c) => [
+          c.name, c.label || "", c.team || "", c.max_connections,
+          c.quota_bytes ? c.quota_bytes / GB : "", c.bandwidth_kbps ? c.bandwidth_kbps / 1000 : "", days(c),
+        ]),
+      ]);
+    }
+    if (method === "GET" && rest === "/endpoints/export") {
+      return csvResponse([
+        ["name", "port", "protocol", "cipher", "dns1", "dns2"],
+        ...endpoints.map((e) => [e.name, e.port, e.protocol, e.cipher, e.dns1 || "", e.dns2 || ""]),
+      ]);
+    }
+    if (method === "POST" && (rest === "/clients/import" || rest === "/endpoints/import")) {
+      return jsonResponse({ created: [], failed: [{ name: "import", error: "Import isn't available in the demo — clone the repo to try this for real." }] });
     }
 
     if (method === "POST" && rest === "/clients") {
