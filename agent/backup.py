@@ -1,7 +1,9 @@
 import logging
 import os
+import sqlite3
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 
 from . import db
@@ -83,6 +85,23 @@ def _safe_members(tar: tarfile.TarFile) -> list[tarfile.TarInfo]:
     return safe
 
 
+def _restore_db(content: bytes) -> None:
+    """Copies the archived limits.db into the live one through SQLite itself. Writing
+    the file directly would swap it out from under connections that are still open
+    (one per worker thread) along with their WAL, corrupting it."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        f.write(content)
+        tmp = Path(f.name)
+    try:
+        src = sqlite3.connect(tmp)
+        try:
+            src.backup(db.get_conn())
+        finally:
+            src.close()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def restore_from_tar(src_path: Path) -> list[str]:
     """Extracts a backup archive over this server's live config. Returns the
     endpoint names found in the restored server-conf/, for the caller to
@@ -103,6 +122,11 @@ def restore_from_tar(src_path: Path) -> list[str]:
             f = tar.extractfile(member)
             if f is None:
                 continue
+            if target == DB_FILE:
+                _restore_db(f.read())
+                continue
+            if target.parent == DB_FILE.parent and target.name.startswith(DB_FILE.name + "-"):
+                continue  # stale -wal/-shm from the archive would corrupt the live WAL database
             target.write_bytes(f.read())
 
     subprocess.run(["chown", "-R", "ovpndash:ovpndash", str(CCD_ROOT)], check=False)

@@ -182,8 +182,19 @@ def op_client_revoke(data: dict) -> dict:
     except RuntimeError as e:
         raise OpError(str(e), code="internal")
 
+    endpoints = db.get_all_endpoints()
+    # The CRL is only checked at the next TLS handshake, which can be up to an hour
+    # away -- kick live sessions now so revoking actually takes the client offline.
+    mgmt_ports = {ep["name"]: ep["mgmt_port"] for ep in endpoints}
+    for s in mgmt.get_all_sessions(endpoints):
+        if s.name == name and s.client_id and s.endpoint in mgmt_ports:
+            try:
+                mgmt.kill_client_id(mgmt_ports[s.endpoint], s.client_id)
+            except OSError:
+                pass
+
     client_ips = db.get_client_ips(name)
-    for ep in db.get_all_endpoints():
+    for ep in endpoints:
         ip = client_ips.get(ep["name"])
         if ip:
             try:
@@ -276,6 +287,14 @@ def op_client_set_static_ip(data: dict) -> dict:
         network = ipaddress.ip_network(ep["subnet"], strict=False)
         if addr not in network:
             raise OpError(f"{static_ip} is not inside this endpoint's subnet ({ep['subnet']}).")
+        if addr in (network.network_address, network.network_address + 1, network.broadcast_address):
+            raise OpError(f"{static_ip} is reserved (network, server or broadcast address).")
+        pool = endpoints_mod.dynamic_pool(ep["name"])
+        if pool and pool[0] <= addr <= pool[1]:
+            raise OpError(
+                f"{static_ip} is in the range OpenVPN hands out automatically ({pool[0]}-{pool[1]}); "
+                "pick an address above it so no other client can be given the same one."
+            )
         owner = db.get_ip_owner(endpoint, static_ip)
         if owner and owner != name:
             raise OpError(f'{static_ip} is already assigned to client "{owner}" on this endpoint.', code="conflict")
@@ -428,6 +447,19 @@ def op_server_restore(data: dict) -> dict:
         raise OpError(str(e), code="bad_request")
     finally:
         src.unlink(missing_ok=True)
+
+    # Restored configs, PKI and CRL only take effect once OpenVPN reloads them.
+    endpoints_mod.reconcile_nat()
+    endpoints_mod.reconcile_ports()
+    failed = []
+    for name in touched:
+        result = subprocess.run(
+            ["sudo", "-n", endpoints_mod.ENDPOINT_CTL, "restart", name], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            failed.append(name)
+    if failed:
+        raise OpError(f"Restored, but these endpoints failed to restart: {', '.join(failed)}.", code="internal")
     return {"endpoints_restored": touched}
 
 

@@ -2,7 +2,7 @@ import shutil
 import time
 from collections import deque
 
-IFACE = "eth0"
+from . import endpoints
 HISTORY_LEN = 60
 
 _net_history: deque = deque(maxlen=HISTORY_LEN)
@@ -38,9 +38,12 @@ _latest = {
 
 
 def _read_net_bytes() -> tuple[int, int]:
+    # The default-route interface, not a hard-coded eth0 -- that reads zero traffic on
+    # boxes that name it ens3, enp1s0, etc.
+    iface = endpoints._default_iface()
     with open("/proc/net/dev") as f:
         for line in f:
-            if line.strip().startswith(f"{IFACE}:"):
+            if line.strip().startswith(f"{iface}:"):
                 parts = line.split(":")[1].split()
                 return int(parts[0]), int(parts[8])
     return 0, 0

@@ -30,14 +30,18 @@ def _read_raw() -> dict:
         "salt": os.environ["ADMIN_PASSWORD_SALT"],
     }
     ADMIN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ADMIN_FILE.write_text(json.dumps(data))
-    ADMIN_FILE.chmod(0o600)
+    _write_raw(data)
     return data
 
 
 def _write_raw(data: dict) -> None:
-    ADMIN_FILE.write_text(json.dumps(data))
-    ADMIN_FILE.chmod(0o600)
+    # Write-then-rename: telemetry threads read this file every few seconds, and a reader
+    # catching it half-written (or a crash mid-write) would break login entirely.
+    tmp = ADMIN_FILE.with_name(ADMIN_FILE.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(data))
+    os.replace(tmp, ADMIN_FILE)
 
 
 def load() -> dict:

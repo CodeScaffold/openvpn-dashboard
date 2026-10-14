@@ -138,6 +138,17 @@ class Hub:
 hub = Hub()
 
 
+async def disconnect(server_id: int, reason: str) -> None:
+    conn = hub.get(server_id)
+    if conn is None:
+        return
+    hub.unregister(server_id, conn)
+    try:
+        await conn.websocket.close(code=4003, reason=reason)
+    except RuntimeError:
+        pass  # already closing
+
+
 async def handle_connection(websocket: WebSocket) -> None:
     """The full lifecycle of one agent's WebSocket: handshake, register,
     receive loop, cleanup on disconnect."""
@@ -196,8 +207,12 @@ async def handle_connection(websocket: WebSocket) -> None:
             if envelope.kind == "res":
                 conn.resolve(envelope)
             elif envelope.kind == "event":
-                await _handle_event(server_id, conn, envelope)
-    except WebSocketDisconnect:
+                try:
+                    await _handle_event(server_id, conn, envelope)
+                except Exception:
+                    log.exception("bad %s event from server_id=%s, dropping", envelope.op, server_id)
+    except (WebSocketDisconnect, RuntimeError):
+        # RuntimeError: receive after the hub itself closed the socket (server deleted)
         pass
     finally:
         hub.unregister(server_id, conn)

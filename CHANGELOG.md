@@ -1,5 +1,46 @@
 # Changelog
 
+## 2.2.0 — Redesigned panel and enforcement fixes
+
+### Changed
+
+- **Redesigned UI.** Server header with uptime/agent/IP inline, one KPI strip, a
+  throughput chart with both directions visible, a step chart for sessions, usage meters
+  for CPU/memory/swap/storage, full-width endpoint and server cards with destructive
+  actions de-emphasised, two-column settings cards, and a matching login page. Light and
+  dark themes share one token set. No new dependencies or web fonts.
+- The dashboard header and server switcher show the server's name instead of its
+  address, so the public IP is no longer visible while the IP field is blurred.
+- New endpoints write OpenVPN's `server` directive out in full so the dynamic pool ends
+  at `.198`; static IPs come from `.199` up and can no longer collide with a dynamically
+  assigned client. Existing endpoints keep their current pool.
+
+### Fixed
+
+- **Revoking a client now disconnects it.** Previously the session stayed up until the
+  next TLS renegotiation, up to an hour later.
+- **Quotas, connection limits and usage accounting kept running only while the agent
+  was connected to the hub.** They now run on the agent's own clock; notifications raised
+  during a hub outage are queued and delivered on reconnect.
+- **Bandwidth caps were lost whenever an endpoint's tun device was recreated** (restart,
+  stop/start, crash, reboot). The agent now notices and re-applies them.
+- **Usage was under-counted after an endpoint restart**, when a reconnecting client
+  reused a dead session's client ID and inherited its larger byte baseline.
+- `admin.json` is written atomically, so a concurrent read or a crash mid-write can no
+  longer leave the panel unable to log in.
+- Changing the admin password now signs out every other session, as the UI states.
+- Deleting a server closes its live agent connection instead of leaving it "online".
+- Network throughput reads the default-route interface instead of a hard-coded `eth0`.
+- Agent ops run off the event loop, so a slow `easyrsa`/`systemctl` call no longer stalls
+  the WebSocket keepalive.
+- Static IP pins reject the network, server and broadcast addresses, and addresses
+  inside the dynamic pool.
+- One malformed row in a CSV import is reported as failed instead of aborting the import.
+- Per-server restore copies `limits.db` through SQLite instead of overwriting the open
+  database, and restarts the restored endpoints.
+- The settings page linked to the wrong repository, and described the panel backup as
+  containing the PKI; it only contains the panel's own settings.
+
 ## 2.1.3 — IPv6 tunneling and leak protection
 
 - New endpoints redirect IPv6 into OpenVPN as well as IPv4. Without an IPv6 exit,

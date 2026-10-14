@@ -22,7 +22,7 @@
   function daysFromNow(n) { return now() + n * 86400; }
   function iso(unixSeconds) { return new Date(unixSeconds * 1000).toISOString(); }
 
-  // ---------- mutable demo state — two servers, one online, one not ----------
+  // ---------- mutable demo state — two online servers, each with its own load profile ----------
   // Independent PKI per server is the whole point of the real product, so
   // each server gets its own client/endpoint lists here too.
 
@@ -30,13 +30,13 @@
     servers: [
       {
         id: 1, name: "de-frankfurt-1", label: "Frankfurt", online: true,
-        agent_version: "1.0.0", hostname: "vpn-fra-1", public_addr: "203.0.113.5",
+        agent_version: "2.2.0", hostname: "vpn-fra-1", public_addr: "203.0.113.5",
         vpn_endpoint: "vpn.example.com", last_seen: iso(now()), created: iso(daysAgo(120)),
       },
       {
-        id: 2, name: "us-newyork-1", label: "New York", online: false,
-        agent_version: "1.0.0", hostname: "vpn-nyc-1", public_addr: "198.51.100.9",
-        vpn_endpoint: "vpn2.example.com", last_seen: iso(daysAgo(2)), created: iso(daysAgo(60)),
+        id: 2, name: "us-newyork-1", label: "New York", online: true,
+        agent_version: "2.2.0", hostname: "vpn-nyc-1", public_addr: "198.51.100.9",
+        vpn_endpoint: "vpn2.example.com", last_seen: iso(now()), created: iso(daysAgo(60)),
       },
     ],
     clientsByServer: {
@@ -67,8 +67,28 @@
         {
           name: "ny-office-router", team: "ops", created: iso(daysAgo(55)), expires: iso(daysFromNow(310)),
           max_connections: 3, quota_bytes: null, used_bytes: 88 * GB,
-          bandwidth_kbps: null, disabled: false, online: false,
+          bandwidth_kbps: null, disabled: false, online: true,
           static_ips: { server: { static_ip: "10.9.0.10", pinned: true } },
+        },
+        {
+          name: "carol-laptop", team: "design", created: iso(daysAgo(33)), expires: iso(daysFromNow(332)),
+          max_connections: 2, quota_bytes: 50 * GB, used_bytes: 18.6 * GB,
+          bandwidth_kbps: null, disabled: false, online: true, static_ips: {},
+        },
+        {
+          name: "ci-runner", team: "ops", created: iso(daysAgo(51)), expires: iso(daysFromNow(679)),
+          max_connections: 1, quota_bytes: null, used_bytes: 212 * GB,
+          bandwidth_kbps: 50000, disabled: false, online: true, static_ips: {},
+        },
+        {
+          name: "dan-phone", team: "design", created: iso(daysAgo(12)), expires: iso(daysFromNow(353)),
+          max_connections: 1, quota_bytes: 10 * GB, used_bytes: 1.2 * GB,
+          bandwidth_kbps: null, disabled: false, online: false, static_ips: {},
+        },
+        {
+          name: "contractor-eu", team: null, created: iso(daysAgo(150)), expires: iso(daysFromNow(14)),
+          max_connections: 1, quota_bytes: null, used_bytes: 9.8 * GB,
+          bandwidth_kbps: null, disabled: false, online: false, static_ips: {},
         },
       ],
     },
@@ -88,68 +108,88 @@
       notify_telegram_enabled: false, notify_telegram_bot_token: "", notify_telegram_chat_id: "",
       client_default_max_connections: 1, client_default_quota_gb: null,
       client_default_bandwidth_mbps: null, client_default_validity_days: 365,
-      retention_points: 60, panel_version: "2.0.0",
+      retention_points: 60, panel_version: "2.2.0",
       panel_repo: "https://github.com/CodeScaffold/openvpn-dashboard",
     },
   };
 
   let nextServerId = 3;
 
-  // ---------- live-looking system metrics (server 1 only — server 2 is offline) ----------
+  // ---------- live-looking system metrics, one independent series per server ----------
 
   const HISTORY_LEN = 60;
-  const sys = { cpu: [], mem: [], swap: [], disk: [], net: [], conn: [] };
-  let cpuBase = 8, memBase = 42, netBase = { rx: 40000, tx: 210000 };
+  const PROFILES = {
+    1: {
+      cpu: [3, 65, 8], mem: [30, 70, 42], swapPct: 9, diskPct: 46,
+      rx: [3000, 400000, 40000], tx: [5000, 900000, 210000],
+      totals: { rx: 7_100_000_000, tx: 6_800_000_000 }, uptime: 14 * 86400 + 3600 * 6, rss: 54_000_000,
+      memTotal: 2_000_000_000, swapTotal: 2_147_000_000, diskTotal: 39_000_000_000,
+    },
+    2: {
+      cpu: [12, 80, 24], mem: [45, 78, 58], swapPct: 3, diskPct: 63,
+      rx: [150000, 2400000, 600000], tx: [400000, 5200000, 1800000],
+      totals: { rx: 312_000_000_000, tx: 47_000_000_000 }, uptime: 41 * 86400 + 3600 * 19, rss: 61_000_000,
+      memTotal: 4_000_000_000, swapTotal: 1_073_000_000, diskTotal: 80_000_000_000,
+    },
+  };
+  const seriesById = {};
 
-  function seedHistory() {
-    let t = now() - HISTORY_LEN * 15;
-    for (let i = 0; i < HISTORY_LEN; i++) {
-      t += 15;
-      tick(t);
-    }
+  function newSeries(p) {
+    return { p, cpu: p.cpu[2], mem: p.mem[2], rx: p.rx[2], tx: p.tx[2], points: [] };
   }
 
-  function tick(t = now()) {
-    cpuBase = clamp(cpuBase + (Math.random() - 0.5) * 6, 3, 65);
-    memBase = clamp(memBase + (Math.random() - 0.5) * 1.5, 30, 70);
-    const swapPct = 9 + Math.sin(t / 400) * 1.5;
-    const diskPct = 46;
-    netBase.rx = clamp(netBase.rx + (Math.random() - 0.5) * 30000, 3000, 400000);
-    netBase.tx = clamp(netBase.tx + (Math.random() - 0.5) * 60000, 5000, 900000);
-    const tcp = state.clientsByServer[1].filter((c) => c.online).length;
-    const udp = 0;
+  function tickServer(id, t) {
+    const sr = seriesById[id];
+    const { p } = sr;
+    sr.cpu = clamp(sr.cpu + (Math.random() - 0.5) * 6, p.cpu[0], p.cpu[1]);
+    sr.mem = clamp(sr.mem + (Math.random() - 0.5) * 1.5, p.mem[0], p.mem[1]);
+    sr.rx = clamp(sr.rx + (Math.random() - 0.5) * p.rx[1] * 0.08, p.rx[0], p.rx[1]);
+    sr.tx = clamp(sr.tx + (Math.random() - 0.5) * p.tx[1] * 0.08, p.tx[0], p.tx[1]);
 
-    sys.cpu.push({ t, v: round1(cpuBase) });
-    sys.mem.push({ t, v: round1(memBase) });
-    sys.swap.push({ t, v: round1(swapPct) });
-    sys.disk.push({ t, v: diskPct });
-    sys.net.push({ t, rx_bps: netBase.rx, tx_bps: netBase.tx });
-    sys.conn.push({ t, tcp, udp });
+    // Sessions follow the online clients, split by each endpoint's transport, with the
+    // occasional reconnect blip.
+    const online = (state.clientsByServer[id] || []).filter((c) => c.online).length;
+    const hasTcp = (state.endpointsByServer[id] || []).some((e) => e.protocol === "tcp");
+    const tcp = hasTcp ? Math.min(online, Math.cos(t / (330 + id * 70)) > 0 ? 1 + (id === 2 ? 1 : 0) : 0) : 0;
+    const udp = Math.max(0, online - tcp + (Math.sin(t / (170 + id * 40)) > 0.7 ? 1 : 0));
 
-    for (const k of Object.keys(sys)) if (sys[k].length > HISTORY_LEN) sys[k].shift();
+    sr.points.push({
+      t, cpu: round1(sr.cpu), mem: round1(sr.mem),
+      swap: round1(p.swapPct + Math.sin(t / 400) * 1.5), disk: p.diskPct,
+      rx: sr.rx, tx: sr.tx, tcp, udp,
+    });
+    if (sr.points.length > HISTORY_LEN) sr.points.shift();
+  }
+
+  function tickAll(t = now()) {
+    for (const s of state.servers) if (s.online && seriesById[s.id]) tickServer(s.id, t);
   }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function round1(v) { return Math.round(v * 10) / 10; }
 
-  seedHistory();
-  setInterval(tick, 4000); // faster than the real 15s poller — livelier for a demo
-
-  const MEM_TOTAL = 2_000_000_000, SWAP_TOTAL = 2_147_000_000, DISK_TOTAL = 39_000_000_000;
+  for (const id of Object.keys(PROFILES)) seriesById[id] = newSeries(PROFILES[id]);
+  {
+    let t = now() - HISTORY_LEN * 15;
+    for (let i = 0; i < HISTORY_LEN; i++) { t += 15; tickAll(t); }
+  }
+  setInterval(tickAll, 4000); // faster than the real 15s poller — livelier for a demo
 
   // Matches the real /api/servers/{id}/system shape: {online, latest, history, vpn_endpoint}.
   // "latest" carries the full raw telemetry snapshot (only available while online, same as
   // the real hub); "history" is the persisted per-point mirror (flat metric columns).
   function systemPayload(server) {
-    if (!server.online) {
+    const sr = seriesById[server.id];
+    if (!server.online || !sr || !sr.points.length) {
       return { online: false, latest: null, history: [], vpn_endpoint: server.vpn_endpoint };
     }
-    const history = sys.cpu.map((_, i) => ({
-      t: sys.cpu[i].t, cpu_percent: sys.cpu[i].v,
-      mem_used: Math.round((sys.mem[i].v / 100) * MEM_TOTAL), mem_total: MEM_TOTAL,
-      swap_used: Math.round((sys.swap[i].v / 100) * SWAP_TOTAL), swap_total: SWAP_TOTAL,
-      disk_used: Math.round((sys.disk[i].v / 100) * DISK_TOTAL), disk_total: DISK_TOTAL,
-      net_rx_bps: sys.net[i].rx_bps, net_tx_bps: sys.net[i].tx_bps,
-      tcp_count: sys.conn[i].tcp, udp_count: sys.conn[i].udp,
+    const { p } = sr;
+    const history = sr.points.map((pt) => ({
+      t: pt.t, cpu_percent: pt.cpu,
+      mem_used: Math.round((pt.mem / 100) * p.memTotal), mem_total: p.memTotal,
+      swap_used: Math.round((pt.swap / 100) * p.swapTotal), swap_total: p.swapTotal,
+      disk_used: Math.round((pt.disk / 100) * p.diskTotal), disk_total: p.diskTotal,
+      net_rx_bps: pt.rx, net_tx_bps: pt.tx,
+      tcp_count: pt.tcp, udp_count: pt.udp,
     }));
     const last = history[history.length - 1];
     const latest = {
@@ -157,9 +197,9 @@
       memory: { used: last.mem_used, total: last.mem_total },
       swap: { used: last.swap_used, total: last.swap_total },
       disk: { used: last.disk_used, total: last.disk_total },
-      net_totals: { rx: 7_100_000_000, tx: 6_800_000_000 },
-      uptime_seconds: 14 * 86400 + 3600 * 6,
-      process_mem_bytes: 54_000_000,
+      net_totals: p.totals,
+      uptime_seconds: p.uptime,
+      process_mem_bytes: p.rss,
     };
     return { online: true, latest, history, vpn_endpoint: server.vpn_endpoint };
   }

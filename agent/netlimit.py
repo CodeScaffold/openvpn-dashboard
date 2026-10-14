@@ -37,9 +37,12 @@ def remove_ccd(ccd_dir: str, name: str) -> None:
         path.unlink()
 
 
+def has_tc_root(iface: str) -> bool:
+    return "htb 1:" in _tc("qdisc", "show", "dev", iface).stdout
+
+
 def ensure_tc_root(iface: str) -> None:
-    show = _tc("qdisc", "show", "dev", iface)
-    if "htb 1:" not in show.stdout:
+    if not has_tc_root(iface):
         _tc("qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "999")
         _tc("class", "add", "dev", iface, "parent", "1:", "classid", "1:999", "htb", "rate", "1000mbit")
     ingress = _tc("qdisc", "show", "dev", iface, "ingress")

@@ -331,7 +331,7 @@
     const metaEl = document.getElementById("switcher-server-meta");
     if (currentServer) {
       dot.classList.toggle("status-dot--off", !currentServer.online);
-      nameEl.textContent = currentServer.vpn_endpoint || currentServer.label || currentServer.name;
+      nameEl.textContent = currentServer.label || currentServer.name;
       metaEl.textContent = currentServer.online ? "Online" : "Offline";
     } else {
       dot.classList.add("status-dot--off");
@@ -352,7 +352,7 @@
           <span class="server-switcher-name"></span>
           <span class="server-switcher-meta">${s.online ? "Online" : "Offline"}</span>
         </span>`;
-      item.querySelector(".server-switcher-name").textContent = s.vpn_endpoint || s.label || s.name;
+      item.querySelector(".server-switcher-name").textContent = s.label || s.name;
       item.addEventListener("click", () => {
         closeSwitcher();
         if (s.id !== currentServerId) {
@@ -384,7 +384,6 @@
             </div>
             <div class="server-card-label"></div>
           </div>
-          <button class="btn btn--ghost btn--icon" data-action="delete">Remove</button>
         </div>
         <div class="server-card-meta">
           <div class="server-card-meta-row"><span>Status</span><b>${s.online ? "Online" : "Offline"}</b></div>
@@ -393,9 +392,12 @@
           <div class="server-card-meta-row"><span>VPN endpoint</span><b>${s.vpn_endpoint || "—"}</b></div>
           <div class="server-card-meta-row"><span>Last seen</span><b>${s.last_seen ? formatDate(s.last_seen) : "never"}</b></div>
         </div>
-        <div class="server-card-actions">
-          <button class="btn btn--ghost btn--icon" data-action="edit">Edit server</button>
-          <button class="btn btn--ghost btn--icon" data-action="use">${s.id === currentServerId ? "Active" : "Switch to"}</button>
+        <div class="card-actions">
+          <div class="btn-group">
+            <button class="btn btn--ghost btn--icon" data-action="use">${s.id === currentServerId ? "Active" : "Switch to"}</button>
+            <button class="btn btn--ghost btn--icon" data-action="edit">Edit</button>
+          </div>
+          <button class="btn btn--quiet-danger btn--icon" data-action="delete">Remove</button>
         </div>
       `;
       card.querySelector(".server-card-name-text").textContent = s.name;
@@ -646,7 +648,7 @@
     const avgUp = seriesMean(hist, "tx_bps");
     const avgDown = seriesMean(hist, "rx_bps");
     document.getElementById("foot-avg-speed").textContent = hist.length
-      ? `↑ ${formatBps(avgUp)}  ↓ ${formatBps(avgDown)}` : "—";
+      ? `↓ ${formatBps(avgDown)} · ↑ ${formatBps(avgUp)}` : "—";
     document.getElementById("foot-open-sessions").textContent = String(sessions.length);
   }
 
@@ -655,7 +657,7 @@
     const text = document.getElementById("agent-status-text");
     dot.classList.toggle("status-dot--off", !sys.online);
     text.textContent = sys.online ? "Agent · Connected" : "Agent · Offline";
-    document.getElementById("action-bar-server-name").textContent = currentServer ? (currentServer.vpn_endpoint || currentServer.label || currentServer.name) : "";
+    document.getElementById("action-bar-server-name").textContent = currentServer ? (currentServer.label || currentServer.name) : "";
   }
 
   function seriesMean(history, key) {
@@ -673,7 +675,7 @@
     document.getElementById("m-cpu-detail").textContent = "";
     document.getElementById("m-cpu-avg").textContent = `avg ${seriesMean(sys.cpu_history, "v").toFixed(0)}%`;
     document.getElementById("m-cpu-peak").textContent = `peak ${seriesPeak(sys.cpu_history, "v").toFixed(0)}%`;
-    renderSparkline("spark-cpu", sys.cpu_history, "v", 100, tileColor(cpuPct));
+    renderMeter("meter-cpu", cpuPct);
 
     const mem = sys.memory;
     const memPct = mem.total ? (mem.used / mem.total) * 100 : 0;
@@ -681,7 +683,7 @@
     document.getElementById("m-mem-detail").textContent = `${formatBytes(mem.used)} / ${formatBytes(mem.total)}`;
     document.getElementById("m-mem-avg").textContent = `avg ${seriesMean(sys.mem_history, "v").toFixed(0)}%`;
     document.getElementById("m-mem-peak").textContent = `peak ${seriesPeak(sys.mem_history, "v").toFixed(0)}%`;
-    renderSparkline("spark-mem", sys.mem_history, "v", 100, tileColor(memPct));
+    renderMeter("meter-mem", memPct);
 
     const swap = sys.swap;
     const swapPct = swap.total ? (swap.used / swap.total) * 100 : 0;
@@ -690,7 +692,7 @@
       ? `${formatBytes(swap.used)} / ${formatBytes(swap.total)}` : "no swap configured";
     document.getElementById("m-swap-avg").textContent = `avg ${seriesMean(sys.swap_history, "v").toFixed(1)}%`;
     document.getElementById("m-swap-peak").textContent = `peak ${seriesPeak(sys.swap_history, "v").toFixed(0)}%`;
-    renderSparkline("spark-swap", sys.swap_history, "v", 100, tileColor(swapPct));
+    renderMeter("meter-swap", swapPct);
 
     const disk = sys.disk;
     const diskPct = disk.total ? (disk.used / disk.total) * 100 : 0;
@@ -698,7 +700,7 @@
     document.getElementById("m-disk-detail").textContent = `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`;
     document.getElementById("m-disk-free").textContent = `free ${formatBytes(disk.total - disk.used)}`;
     document.getElementById("m-disk-avg").textContent = `avg ${seriesMean(sys.disk_history, "v").toFixed(1)}%`;
-    renderSparkline("spark-disk", sys.disk_history, "v", 100, tileColor(diskPct));
+    renderMeter("meter-disk", diskPct);
   }
 
   function tileColor(pct) {
@@ -739,20 +741,10 @@
     });
   }
 
-  function renderSparkline(containerId, history, key, maxScale, color) {
-    const el = document.getElementById(containerId);
-    if (!history || history.length < 2) { el.innerHTML = ""; return; }
-    const W = 200, H = 34, PAD = 2;
-    const points = seriesPoints(history, key, W, H, PAD, maxScale);
-    const linePath = smoothLineD(points);
-    const last = points[points.length - 1];
-    const first = points[0];
-    const area = `${linePath} L${last[0]},${(H - PAD).toFixed(1)} L${first[0]},${(H - PAD).toFixed(1)} Z`;
-    el.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-        <path d="${area}" fill="${color}" fill-opacity="0.12" stroke="none"></path>
-        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></path>
-      </svg>`;
+  function renderMeter(id, pct) {
+    const el = document.getElementById(id);
+    el.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    el.style.background = tileColor(pct);
   }
 
   function renderHealthBanner(sys) {
@@ -780,7 +772,14 @@
     }
   }
 
-  function renderDualChart(containerId, history, keyA, keyB, nowIdA, nowIdB, formatFn, labelA, labelB) {
+  function stepLineD(points) {
+    if (points.length < 2) return "";
+    let d = `M${points[0][0]},${points[0][1]}`;
+    for (let i = 1; i < points.length; i++) d += ` H${points[i][0]} V${points[i][1]}`;
+    return d;
+  }
+
+  function renderDualChart(containerId, history, keyA, keyB, nowIdA, nowIdB, formatFn, labelA, labelB, step = false) {
     const container = document.getElementById(containerId);
     if (!history || history.length < 2) {
       container.innerHTML = '<p class="chart-empty">Collecting data&hellip;</p>';
@@ -789,26 +788,47 @@
       return;
     }
     const W = 600, H = 180, PAD = 4;
-    const maxVal = Math.max(1, ...history.flatMap((h) => [h[keyA], h[keyB]])) * 1.15;
+    const peak = Math.max(1, ...history.flatMap((h) => [h[keyA], h[keyB]]));
+    // Integer series get an integer ceiling so the axis label never reads "2.3 sessions".
+    const maxVal = step ? Math.ceil(peak) + 1 : peak * 1.15;
 
     const pointsA = seriesPoints(history, keyA, W, H, PAD, maxVal);
     const pointsB = seriesPoints(history, keyB, W, H, PAD, maxVal);
-    const pathA = smoothLineD(pointsA);
-    const pathB = smoothLineD(pointsB);
-    const lastA = pointsA[pointsA.length - 1];
-    const firstA = pointsA[0];
-    const areaA = `${pathA} L${lastA[0]},${(H - PAD).toFixed(1)} L${firstA[0]},${(H - PAD).toFixed(1)} Z`;
+    const lineD = step ? stepLineD : smoothLineD;
+    const pathA = lineD(pointsA);
+    const pathB = lineD(pointsB);
+    const base = (H - PAD).toFixed(1);
+    const areaOf = (path, pts) => `${path} L${pts[pts.length - 1][0]},${base} L${pts[0][0]},${base} Z`;
+    const gid = `${containerId}-g`;
+    const grid = [0.25, 0.5, 0.75].map((f) => {
+      const y = (PAD + f * (H - PAD * 2)).toFixed(1);
+      return `<line class="chart-grid" x1="0" x2="${W}" y1="${y}" y2="${y}"></line>`;
+    }).join("");
 
     container.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-        <path d="${areaA}" fill="var(--ov-orange-tint)" stroke="none"></path>
-        <path d="${pathA}" fill="none" stroke="var(--ov-orange)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
-        <path d="${pathB}" fill="none" stroke="#4a90c4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
-        <line class="chart-crosshair" x1="0" x2="0" y1="${PAD}" y2="${H - PAD}"></line>
-        <circle class="chart-dot" cx="0" cy="0" fill="var(--ov-orange)"></circle>
-        <circle class="chart-dot" cx="0" cy="0" fill="#4a90c4"></circle>
+        <defs>
+          <linearGradient id="${gid}-a" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="var(--series-a)" stop-opacity="0.28"/>
+            <stop offset="1" stop-color="var(--series-a)" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="${gid}-b" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="var(--series-b)" stop-opacity="0.22"/>
+            <stop offset="1" stop-color="var(--series-b)" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${grid}
+        <line class="chart-baseline" x1="0" x2="${W}" y1="${base}" y2="${base}"></line>
+        <path d="${areaOf(pathB, pointsB)}" fill="url(#${gid}-b)" stroke="none"></path>
+        <path d="${areaOf(pathA, pointsA)}" fill="url(#${gid}-a)" stroke="none"></path>
+        <path d="${pathB}" fill="none" stroke="var(--series-b)" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+        <path d="${pathA}" fill="none" stroke="var(--series-a)" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+        <line class="chart-crosshair" x1="0" x2="0" y1="${PAD}" y2="${H - PAD}" vector-effect="non-scaling-stroke"></line>
         <rect class="chart-hit" x="0" y="0" width="${W}" height="${H}"></rect>
       </svg>
+      <span class="chart-axis">${formatFn(maxVal)}</span>
+      <span class="chart-dot" style="background:var(--series-b)"></span>
+      <span class="chart-dot" style="background:var(--series-a)"></span>
       <div class="chart-tooltip"></div>`;
 
     const last = history[history.length - 1];
@@ -835,18 +855,17 @@
       crosshair.setAttribute("x1", pointsA[idx][0]);
       crosshair.setAttribute("x2", pointsA[idx][0]);
       crosshair.style.opacity = 1;
-      dots[0].setAttribute("cx", pointsA[idx][0]);
-      dots[0].setAttribute("cy", pointsA[idx][1]);
-      dots[0].style.opacity = 1;
-      dots[1].setAttribute("cx", pointsB[idx][0]);
-      dots[1].setAttribute("cy", pointsB[idx][1]);
-      dots[1].style.opacity = 1;
+      const rect = svg.getBoundingClientRect();
+      [pointsB, pointsA].forEach((pts, i) => {
+        dots[i].style.left = `${(pts[idx][0] / W) * rect.width}px`;
+        dots[i].style.top = `${(pts[idx][1] / H) * rect.height}px`;
+        dots[i].style.opacity = 1;
+      });
 
       tooltip.innerHTML = `
         <div class="chart-tooltip-time">${formatClock(point.t)}</div>
-        <div class="chart-tooltip-row"><span class="chart-tooltip-swatch" style="background:var(--ov-orange)"></span>${labelA} ${formatFn(point[keyA])}</div>
-        <div class="chart-tooltip-row"><span class="chart-tooltip-swatch" style="background:#4a90c4"></span>${labelB} ${formatFn(point[keyB])}</div>`;
-      const rect = svg.getBoundingClientRect();
+        <div class="chart-tooltip-row"><span class="chart-tooltip-swatch" style="background:var(--series-a)"></span>${labelA}<b>${formatFn(point[keyA])}</b></div>
+        <div class="chart-tooltip-row"><span class="chart-tooltip-swatch" style="background:var(--series-b)"></span>${labelB}<b>${formatFn(point[keyB])}</b></div>`;
       tooltip.style.left = `${(pointsA[idx][0] / W) * rect.width}px`;
       tooltip.style.top = `${(Math.min(pointsA[idx][1], pointsB[idx][1]) / H) * rect.height}px`;
       tooltip.classList.add("visible");
@@ -872,7 +891,7 @@
   }
 
   function renderConnectionsChart(history) {
-    renderDualChart("connections-chart", history, "tcp", "udp", "chart-tcp-now", "chart-udp-now", (v) => String(v), "TCP", "UDP");
+    renderDualChart("connections-chart", history, "tcp", "udp", "chart-tcp-now", "chart-udp-now", (v) => String(v), "TCP", "UDP", true);
   }
 
   function renderInfoStrip(sys) {
@@ -924,17 +943,19 @@
             </div>
             <div class="ep-card-meta">${ep.protocol.toUpperCase()} &middot; ${ep.port} &middot; ${ep.cipher}</div>
           </div>
-          <button class="btn btn--ghost btn--icon" data-action="delete">Delete</button>
         </div>
         <div class="ep-card-stats">
-          <div><span class="ep-card-stat-label">Online</span><span class="ep-card-stat-value">${ep.online}</span></div>
-          <div><span class="ep-card-stat-label">Status</span><span class="ep-card-stat-value">${ep.active ? "Active" : "Stopped"}</span></div>
+          <div><span class="kpi-label">Online</span><span class="ep-card-stat-value">${ep.online}</span></div>
+          <div><span class="kpi-label">Status</span><span class="ep-card-stat-value">${ep.active ? "Active" : "Stopped"}</span></div>
         </div>
-        <div class="ep-card-actions" style="justify-content:flex-start;flex-wrap:wrap">
-          <button class="btn btn--ghost btn--icon" data-action="restart">Restart</button>
-          <button class="btn btn--ghost btn--icon" data-action="toggle">${ep.active ? "Stop" : "Start"}</button>
-          <button class="btn btn--ghost btn--icon" data-action="logs">Logs</button>
-          <button class="btn btn--ghost btn--icon" data-action="config">Config</button>
+        <div class="card-actions">
+          <div class="btn-group">
+            <button class="btn btn--ghost btn--icon" data-action="restart">Restart</button>
+            <button class="btn btn--ghost btn--icon" data-action="toggle">${ep.active ? "Stop" : "Start"}</button>
+            <button class="btn btn--ghost btn--icon" data-action="logs">Logs</button>
+            <button class="btn btn--ghost btn--icon" data-action="config">Config</button>
+          </div>
+          <button class="btn btn--quiet-danger btn--icon" data-action="delete">Delete</button>
         </div>
       `;
       card.querySelector('[data-action="delete"]').addEventListener("click", () => openDeleteEndpoint(ep.name));
@@ -1208,7 +1229,7 @@
         <div class="row-actions">
           <button class="btn btn--ghost btn--icon" data-action="limits">Limits</button>
           <button class="btn btn--ghost btn--icon" data-action="download">Download</button>
-          <button class="btn btn--danger btn--icon" data-action="revoke">Revoke</button>
+          <button class="btn btn--quiet-danger btn--icon" data-action="revoke">Revoke</button>
         </div>`;
       actionsTd.querySelector('[data-action="limits"]').addEventListener("click", () => openLimits(c));
       actionsTd.querySelector('[data-action="download"]').addEventListener("click", () => openDownload(c.name));

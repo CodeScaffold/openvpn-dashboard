@@ -127,7 +127,21 @@ def _config_text(name: str, port: int, protocol: str, cipher: str, tun_dev: str,
         "dh none",
         "ecdh-curve prime256v1",
         "topology subnet",
-        f"server {network.network_address} {network.netmask}",
+    ]
+    # The `server` shortcut written out by hand, so the automatic pool can stop short of
+    # the block static IPs come from (db.allocate_static_ip). With `server`, the pool
+    # always spans the whole subnet and can hand a dynamic client a pinned client's
+    # address. (`server ... nopool` would be shorter, but OpenVPN rejects it alongside
+    # server-ipv6.)
+    hosts = list(network.hosts())
+    gateway, pool_start, pool_end = hosts[0], hosts[1], hosts[-57]
+    lines += [
+        "mode server",
+        "tls-server",
+        f"ifconfig {gateway} {network.netmask}",
+        f"ifconfig-pool {pool_start} {pool_end} {network.netmask}",
+        'push "topology subnet"',
+        f'push "route-gateway {gateway}"',
         f"ifconfig-pool-persist ipp-{name}.txt",
         'push "redirect-gateway def1 bypass-dhcp ipv6"',
     ]
@@ -284,6 +298,20 @@ def ensure_bind_ip() -> None:
     if not BIND_IP:
         return
     subprocess.run(["sudo", "-n", BIND_IP_CTL, BIND_IP], capture_output=True, text=True)
+
+
+def dynamic_pool(name: str) -> tuple[ipaddress.IPv4Address, ipaddress.IPv4Address] | None:
+    """The address range OpenVPN assigns automatically on this endpoint, or None for
+    endpoints created before the pool was narrowed (their `server` line still covers the
+    whole subnet, so there is no address a pin can safely avoid)."""
+    conf = SERVER_DIR / f"{name}.conf"
+    if not conf.exists():
+        return None
+    for line in conf.read_text().splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "ifconfig-pool":
+            return ipaddress.IPv4Address(parts[1]), ipaddress.IPv4Address(parts[2])
+    return None
 
 
 def is_active(name: str) -> bool:

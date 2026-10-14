@@ -55,7 +55,10 @@ def reconcile() -> ReconcileResult:
             continue
         total = s.bytes_received + s.bytes_sent
         baseline = db.get_baseline(s.endpoint, s.client_id)
-        delta = total if baseline is None else max(0, total - baseline)
+        # OpenVPN restarts client IDs from 0 after an endpoint restart, so a reconnecting
+        # client can inherit a dead session's (larger) baseline. A counter below its
+        # baseline can only be a new session: count all of it.
+        delta = total if baseline is None or total < baseline else total - baseline
         db.set_baseline(s.endpoint, s.client_id, s.name, total)
         if delta:
             db.ensure_client_row(s.name)
@@ -106,6 +109,8 @@ def reconcile() -> ReconcileResult:
     # endpoint up/down transitions
     for ep in endpoints:
         active = endpoints_mod.is_active(ep["name"])
+        if active:
+            _restore_bandwidth_caps(ep, limits)
         was = _endpoint_was_active.get(ep["name"])
         if was is not None and was and not active:
             result.events.append(("endpoint_down", f'Endpoint "{ep["name"]}" is no longer active.'))
@@ -114,6 +119,24 @@ def reconcile() -> ReconcileResult:
         _endpoint_was_active[ep["name"]] = active
 
     return result
+
+
+def _restore_bandwidth_caps(ep, limits) -> None:
+    """tc state lives on the tun device, which OpenVPN recreates on every restart,
+    stop/start, crash or reboot, silently dropping every cap on that endpoint. A missing
+    root qdisc is the cheap tell that this happened."""
+    if netlimit.has_tc_root(ep["tun_dev"]):
+        return
+    ip_to_kbps = {}
+    for name, row in limits.items():
+        if not row["bandwidth_kbps"]:
+            continue
+        ip = db.get_client_ips(name).get(ep["name"])
+        if ip:
+            ip_to_kbps[ip] = row["bandwidth_kbps"]
+    if ip_to_kbps:
+        log.info("re-applying %d bandwidth cap(s) on %s", len(ip_to_kbps), ep["tun_dev"])
+        netlimit.reapply_endpoint(ep["tun_dev"], ip_to_kbps)
 
 
 async def run_forever() -> None:

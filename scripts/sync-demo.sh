@@ -37,11 +37,15 @@ content = content.replace(
     '''<link rel="stylesheet" href="styles.css">
 <style>
   .demo-banner {
-    background: #ee7623; color: #12161d; font-weight: 600; font-size: 0.85rem;
-    text-align: center; padding: 9px 16px;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--surface-card); color: var(--text-muted); font-size: 0.8rem;
+    text-align: center; padding: 7px 16px; border-bottom: 1px solid var(--border);
+    font-family: var(--font);
   }
-  .demo-banner a { color: #12161d; text-decoration: underline; }
+  .demo-banner::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ov-orange); }
+  .demo-banner a { color: var(--text); font-weight: 600; text-decoration: none; }
+  .demo-banner a:hover { color: var(--ov-orange); }
+  @media (min-width: 821px) { .sidebar { height: calc(100vh - 34px); } }
 </style>''',
 )
 content = content.replace(

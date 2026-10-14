@@ -24,8 +24,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import backup as backup_mod, hub, hub_db, notify, settings
 from .hub import RemoteOpError
 
-APP_VERSION = "2.1.3"
-REPO_URL = "https://github.com/CodeScaffold/ovpn-dashboard"
+APP_VERSION = "2.2.0"
+REPO_URL = "https://github.com/CodeScaffold/openvpn-dashboard"
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -237,7 +237,9 @@ def change_password(body: ChangePasswordBody, request: Request):
         raise HTTPException(status_code=400, detail="New password must be at least 8 characters.")
     salt = secrets.token_bytes(16)
     new_hash = hashlib.pbkdf2_hmac("sha256", body.new_password.encode(), salt, 200_000)
-    settings.update({"hash": new_hash.hex(), "salt": salt.hex()})
+    new_epoch = settings.load()["session_epoch"] + 1
+    settings.update({"hash": new_hash.hex(), "salt": salt.hex(), "session_epoch": new_epoch})
+    request.session["epoch"] = new_epoch  # every other session is signed out; this tab stays in
     return {"ok": True}
 
 
@@ -388,10 +390,13 @@ def update_server(server_id: int, body: UpdateServerBody, request: Request):
 
 
 @app.delete("/api/servers/{server_id}")
-def delete_server(server_id: int, request: Request):
+async def delete_server(server_id: int, request: Request):
     require_auth(request)
     _require_server(server_id)
     hub_db.delete_server(server_id)
+    # Its token is gone, but a live link would keep it "online" and keep writing
+    # telemetry rows for a server that no longer exists.
+    await hub.disconnect(server_id, "Server was removed from the dashboard.")
     return {"ok": True}
 
 
@@ -527,18 +532,23 @@ async def import_clients(server_id: int, request: Request, file: UploadFile):
         name = (row.get("name") or "").strip()
         if not name:
             continue
-        limits = {
-            "name": name,
-            "max_connections": int(row["max_connections"]) if row.get("max_connections") else 1,
-            "quota_gb": float(row["quota_gb"]) if row.get("quota_gb") else None,
-            "bandwidth_mbps": float(row["bandwidth_mbps"]) if row.get("bandwidth_mbps") else None,
-        }
+        try:
+            limits = {
+                "name": name,
+                "max_connections": int(row["max_connections"]) if row.get("max_connections") else 1,
+                "quota_gb": float(row["quota_gb"]) if row.get("quota_gb") else None,
+                "bandwidth_mbps": float(row["bandwidth_mbps"]) if row.get("bandwidth_mbps") else None,
+            }
+            validity_days = int(row["validity_days"]) if row.get("validity_days") else cfg["client_default_validity_days"]
+        except ValueError:
+            failed.append({"name": name, "error": "max_connections, quota_gb, bandwidth_mbps and validity_days must be numbers."})
+            continue
         if row.get("team"):
             limits["team"] = row["team"]
         if row.get("label"):
             limits["label"] = row["label"]
         try:
-            create_data = dict(limits, validity_days=int(row["validity_days"]) if row.get("validity_days") else cfg["client_default_validity_days"])
+            create_data = dict(limits, validity_days=validity_days)
             await _call(server_id, "client.create", create_data)
             created.append(name)
         except HTTPException as e:
@@ -692,9 +702,14 @@ async def import_endpoints(server_id: int, request: Request, file: UploadFile):
         name = (row.get("name") or "").strip()
         if not name:
             continue
+        try:
+            port = int(row.get("port") or "")
+        except ValueError:
+            failed.append({"name": name, "error": "port must be a number."})
+            continue
         data = {
             "name": name,
-            "port": int(row["port"]),
+            "port": port,
             "protocol": (row.get("protocol") or "").strip().lower(),
             "cipher": (row.get("cipher") or "AES-128-GCM").strip(),
             "dns1": (row.get("dns1") or "1.1.1.1").strip(),
