@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.3 — IPv6 tunneling and leak protection
+
+- New endpoints redirect IPv6 into OpenVPN as well as IPv4. Without an IPv6 exit,
+  they reject IPv6 inside the tunnel to prevent traffic bypassing the VPN.
+- `IPV6_EGRESS` enables working IPv6 through a public address already assigned to
+  the server, with per-endpoint IPv6 tunnel subnets, NAT66, and scoped forwarding
+  rules. Rules are restored on agent startup without restarting endpoints.
+- Static IPv4 assignments also receive IPv6 CCD assignments. IPv6 bandwidth
+  filters share the client's IPv4 download class and enforce IPv6 upload limits.
+- Existing endpoints can be upgraded explicitly with
+  `python -m agent.ipv6 --upgrade-configs`; custom settings are preserved, backups
+  are saved, and services are not restarted automatically. See README for setup.
+- Added unit coverage and Linux integration tests for real OpenVPN dual-stack
+  traffic, IPv6 egress, bandwidth filters, fallback blocking, and rule cleanup.
+
 ## 2.1.2 — BIND_IP persistence, self-heal, and a default swapfile
 
 ### Fixed

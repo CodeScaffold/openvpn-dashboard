@@ -1,0 +1,48 @@
+#!/bin/bash
+# Root-owned, narrow helper installed by both agent installation paths.
+# One IPv6 SNAT and two forwarding rules per endpoint; never flush any table.
+set -euo pipefail
+action="${1:-}"
+iface="${2:-}"
+subnet="${3:-}"
+target="${4:-}"
+[[ "$action" == add || "$action" == remove ]] || exit 1
+[[ "$iface" =~ ^tun[0-9]{1,3}$ ]] || exit 1
+# Validate with ipaddress, not shell interpolation or a permissive IPv6 regex.
+python3 - "$subnet" "$target" <<'PY'
+import ipaddress, sys
+network = ipaddress.IPv6Network(sys.argv[1])
+target = ipaddress.IPv6Address(sys.argv[2])
+if network.prefixlen != 64 or network.network_address not in ipaddress.IPv6Network('fd00::/8'):
+    raise SystemExit('Expected a VPN ULA /64')
+if not target.is_global or target.ipv4_mapped:
+    raise SystemExit('Expected a public IPv6 exit address')
+PY
+default_iface="$(ip -6 route show default | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+[[ "$default_iface" =~ ^[a-zA-Z0-9_.:-]{1,32}$ ]] || { echo 'No IPv6 default route' >&2; exit 1; }
+if [[ "$action" == add ]]; then
+  python3 - "$default_iface" "$target" <<'PY'
+import ipaddress, json, subprocess, sys
+addresses = json.loads(subprocess.check_output(['ip', '-j', '-6', 'addr', 'show', 'dev', sys.argv[1]]))
+if not any(ipaddress.ip_address(a['local']) == ipaddress.ip_address(sys.argv[2])
+           for dev in addresses for a in dev.get('addr_info', [])):
+    raise SystemExit('IPv6 exit address is not assigned to the uplink')
+PY
+  # Routers must keep accepting RAs on an uplink that learns its route via RA.
+  # Set this first, so enabling forwarding does not drop that default route.
+  sysctl -w "net.ipv6.conf.${default_iface}.accept_ra=2" >/dev/null
+  sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
+fi
+rule() {
+  local table="$1" chain="$2"
+  shift 2
+  if [[ "$action" == add ]]; then
+    ip6tables -w 5 -t "$table" -C "$chain" "$@" 2>/dev/null || \
+      ip6tables -w 5 -t "$table" -I "$chain" 1 "$@"
+  else
+    ip6tables -w 5 -t "$table" -D "$chain" "$@" 2>/dev/null || true
+  fi
+}
+rule nat POSTROUTING -s "$subnet" -o "$default_iface" -j SNAT --to-source "$target"
+rule filter FORWARD -i "$iface" -o "$default_iface" -s "$subnet" -j ACCEPT
+rule filter FORWARD -i "$default_iface" -o "$iface" -d "$subnet" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT

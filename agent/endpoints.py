@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import db
+from . import db, ipv6
 
 SERVER_DIR = Path("/etc/openvpn/server")
 NAME_RE = re.compile(r"^[a-z0-9-]{1,24}$")
@@ -129,8 +129,9 @@ def _config_text(name: str, port: int, protocol: str, cipher: str, tun_dev: str,
         "topology subnet",
         f"server {network.network_address} {network.netmask}",
         f"ifconfig-pool-persist ipp-{name}.txt",
-        'push "redirect-gateway def1 bypass-dhcp"',
+        'push "redirect-gateway def1 bypass-dhcp ipv6"',
     ]
+    lines += ipv6.config_lines(subnet)
     if dns1:
         lines.append(f'push "dhcp-option DNS {dns1}"')
     if dns2:
@@ -186,6 +187,13 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
 
     _open_port(port, protocol)
     _ensure_nat(subnet)
+    try:
+        ipv6.configure_runtime("add", tun_dev, ipv6.network(subnet))
+    except Exception:
+        conf_path.unlink(missing_ok=True)
+        _close_port(port, protocol)
+        _remove_nat(subnet)
+        raise
 
     result = subprocess.run(
         ["sudo", "-n", ENDPOINT_CTL, "enable-now", name],
@@ -202,6 +210,7 @@ def create_endpoint(name: str, port: int, protocol: str, cipher: str, dns1: str,
                         capture_output=True, text=True)
         _close_port(port, protocol)
         _remove_nat(subnet)
+        ipv6.configure_runtime("remove", tun_dev, ipv6.network(subnet))
         raise RuntimeError(f"OpenVPN failed to start for endpoint '{name}': {result.stderr.strip()[-400:]}")
 
     db.ensure_endpoint(name, port, protocol, cipher, mgmt_port, tun_dev, subnet, dns1, dns2, ccd_dir)
@@ -214,7 +223,11 @@ def delete_endpoint(name: str) -> None:
 
     subprocess.run(["sudo", "-n", ENDPOINT_CTL, "disable-now", name],
                     capture_output=True, text=True)
-    (SERVER_DIR / f"{name}.conf").unlink(missing_ok=True)
+    conf_path = SERVER_DIR / f"{name}.conf"
+    ipv6_subnet = ipv6.configured_network(conf_path)
+    if ipv6_subnet:
+        ipv6.configure_runtime("remove", row["tun_dev"], ipv6_subnet)
+    conf_path.unlink(missing_ok=True)
     _close_port(row["port"], row["protocol"])
     _remove_nat(row["subnet"])
 

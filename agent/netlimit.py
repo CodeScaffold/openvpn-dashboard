@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+from . import db, ipv6
+
 STATIC_NETMASK = "255.255.255.0"
 
 
@@ -19,6 +21,10 @@ def write_ccd(ccd_dir: str, name: str, static_ip: str | None, disabled: bool) ->
         lines.append("disable")
     if static_ip:
         lines.append(f"ifconfig-push {static_ip} {STATIC_NETMASK}")
+        from . import endpoints
+        subnet = ipv6.configured_network(endpoints.SERVER_DIR / f"{Path(ccd_dir).name}.conf")
+        if subnet:
+            lines.append(f"ifconfig-ipv6-push {ipv6.client_address(subnet, static_ip)}/{subnet.prefixlen} {subnet.network_address + 1}")
     if lines:
         path.write_text("\n".join(lines) + "\n")
     elif path.exists():
@@ -45,6 +51,15 @@ def _class_id(static_ip: str) -> int:
     return int(static_ip.rsplit(".", 1)[-1])
 
 
+def _ipv6_address(iface: str, static_ip: str) -> str | None:
+    from . import endpoints
+    for row in db.get_all_endpoints():
+        if row["tun_dev"] == iface:
+            subnet = ipv6.configured_network(endpoints.SERVER_DIR / f"{row['name']}.conf")
+            return ipv6.client_address(subnet, static_ip) if subnet else None
+    return None
+
+
 def apply_bandwidth(iface: str, static_ip: str, kbps: int) -> None:
     ensure_tc_root(iface)
     cid = _class_id(static_ip)
@@ -54,6 +69,8 @@ def apply_bandwidth(iface: str, static_ip: str, kbps: int) -> None:
     # prio before adding fresh ones. Deleting a non-existent prio is a harmless no-op.
     _tc("filter", "del", "dev", iface, "parent", "1:", "prio", str(cid))
     _tc("filter", "del", "dev", iface, "parent", "ffff:", "prio", str(cid))
+    _tc("filter", "del", "dev", iface, "parent", "1:", "prio", str(cid + 256))
+    _tc("filter", "del", "dev", iface, "parent", "ffff:", "prio", str(cid + 256))
 
     _tc(
         "class", "replace", "dev", iface, "parent", "1:", "classid", f"1:{cid}",
@@ -68,12 +85,27 @@ def apply_bandwidth(iface: str, static_ip: str, kbps: int) -> None:
         "u32", "match", "ip", "src", f"{static_ip}/32",
         "police", "rate", f"{kbps}kbit", "burst", "32k", "drop", "flowid", ":1",
     )
+    address6 = _ipv6_address(iface, static_ip)
+    if address6:
+        _tc(
+            "filter", "add", "dev", iface, "protocol", "ipv6", "parent", "1:", "prio", str(cid + 256),
+            "u32", "match", "ip6", "dst", f"{address6}/128", "flowid", f"1:{cid}",
+            check=True,
+        )
+        _tc(
+            "filter", "add", "dev", iface, "protocol", "ipv6", "parent", "ffff:", "prio", str(cid + 256),
+            "u32", "match", "ip6", "src", f"{address6}/128",
+            "police", "rate", f"{kbps}kbit", "burst", "32k", "drop", "flowid", ":1",
+            check=True,
+        )
 
 
 def remove_bandwidth(iface: str, static_ip: str) -> None:
     cid = _class_id(static_ip)
     _tc("filter", "del", "dev", iface, "parent", "1:", "prio", str(cid))
     _tc("filter", "del", "dev", iface, "parent", "ffff:", "prio", str(cid))
+    _tc("filter", "del", "dev", iface, "parent", "1:", "prio", str(cid + 256))
+    _tc("filter", "del", "dev", iface, "parent", "ffff:", "prio", str(cid + 256))
     _tc("class", "del", "dev", iface, "parent", "1:", "classid", f"1:{cid}")
 
 

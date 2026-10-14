@@ -25,6 +25,8 @@
 #   SWAP_GB      size of a swapfile to create if this box has none (default 2). Cheap
 #                insurance against an OOM kill on a small VPS. Set to 0 to skip, or just
 #                delete /swapfile and its /etc/fstab line afterward if you change your mind.
+#   IPV6_EGRESS  public IPv6 address already assigned to this host; enables IPv6
+#                tunneling with NAT66. Without it, new endpoints block IPv6 leaks.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -256,6 +258,7 @@ ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-bind-ip-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-fw-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-ipv6-ctl
 SUDOEOF
 visudo -c -f /etc/sudoers.d/ovpndash
 chmod 440 /etc/sudoers.d/ovpndash
@@ -269,6 +272,7 @@ else
   git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR"
 fi
 cd "$INSTALL_DIR"
+install -o root -g root -m 755 scripts/ovpn-ipv6-ctl /usr/local/bin/ovpn-ipv6-ctl
 python3 -m venv venv
 venv/bin/pip install --quiet --no-cache-dir -r requirements.txt
 
@@ -278,6 +282,7 @@ mkdir -p /etc/ovpn-dashboard
   echo "HUB_URL=${HUB_URL}"
   echo "AGENT_TOKEN=${AGENT_TOKEN}"
   [ -n "${BIND_IP:-}" ] && echo "BIND_IP=${BIND_IP}" || true
+  [ -n "${IPV6_EGRESS:-}" ] && echo "IPV6_EGRESS=${IPV6_EGRESS}" || true
 } > /etc/ovpn-dashboard/agent.env
 chmod 600 /etc/ovpn-dashboard/agent.env
 

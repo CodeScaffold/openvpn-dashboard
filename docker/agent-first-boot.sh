@@ -152,6 +152,7 @@ ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-endpoint-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-nat-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-bind-ip-ctl
 ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-fw-ctl
+ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-ipv6-ctl
 SUDOEOF
 chmod 440 /etc/sudoers.d/ovpndash
 
@@ -201,12 +202,17 @@ VARSEOF
     echo "HUB_URL=${HUB_URL:?HUB_URL must be set -- pass -e HUB_URL=wss://your-panel/agent/ws}"
     echo "AGENT_TOKEN=${AGENT_TOKEN:?AGENT_TOKEN must be set -- from the dashboard Add Server dialog}"
     [ -n "${BIND_IP:-}" ] && echo "BIND_IP=${BIND_IP}" || true
+    [ -n "${IPV6_EGRESS:-}" ] && echo "IPV6_EGRESS=${IPV6_EGRESS}" || true
   } > /etc/ovpn-dashboard/agent.env
   chmod 600 /etc/ovpn-dashboard/agent.env
 
   touch "$MARKER"
   echo "[agent-first-boot] Done. Check the dashboard's Servers page — this box should show online shortly."
 fi
+
+# Allow changing IPv6 egress on container recreation without re-enrolling.
+sed -i '/^IPV6_EGRESS=/d' /etc/ovpn-dashboard/agent.env
+[ -z "${IPV6_EGRESS:-}" ] || echo "IPV6_EGRESS=${IPV6_EGRESS}" >> /etc/ovpn-dashboard/agent.env
 
 chown -R ovpndash:ovpndash /etc/openvpn/easy-rsa /etc/openvpn/ccd /etc/openvpn/clients /etc/openvpn/server /etc/ovpn-dashboard
 chmod 600 /etc/openvpn/server/server.key /etc/ovpn-dashboard/agent.env 2>/dev/null || true

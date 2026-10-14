@@ -18,11 +18,11 @@ from pathlib import Path
 import websockets
 
 from common.wire import PROTOCOL_VERSION, Envelope, HelloData, event, response
-from . import backup as backup_mod, db, endpoints as endpoints_mod, ops, pki, poller, system
+from . import backup as backup_mod, db, endpoints as endpoints_mod, ipv6, ops, pki, poller, system
 
 log = logging.getLogger("ovpn-agent")
 
-AGENT_VERSION = "0.1.0-dev"
+AGENT_VERSION = "2.1.3"
 
 RECONNECT_MIN_SECONDS = 1
 RECONNECT_MAX_SECONDS = 60
@@ -225,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
     hub_url = os.environ["HUB_URL"]
     token = os.environ["AGENT_TOKEN"]
+    ipv6.reconcile()
     try:
         endpoints_mod.reconcile_endpoints()
     except Exception:

@@ -38,10 +38,11 @@ COPY requirements.txt ./
 RUN python3 -m venv venv && venv/bin/pip install --no-cache-dir -r requirements.txt
 
 COPY docker/agent-first-boot.sh /usr/local/bin/agent-first-boot.sh
+COPY scripts/ovpn-ipv6-ctl /usr/local/bin/ovpn-ipv6-ctl
 COPY docker/agent-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY docker/agent-first-boot.service /etc/systemd/system/agent-first-boot.service
 COPY docker/ovpn-agent.service /etc/systemd/system/ovpn-agent.service
-RUN chmod +x /usr/local/bin/agent-first-boot.sh /usr/local/bin/docker-entrypoint.sh \
+RUN chmod +x /usr/local/bin/agent-first-boot.sh /usr/local/bin/docker-entrypoint.sh /usr/local/bin/ovpn-ipv6-ctl \
     && systemctl enable agent-first-boot.service \
     && mkdir -p /etc/openvpn/easy-rsa \
     && cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/

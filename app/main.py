@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import backup as backup_mod, hub, hub_db, notify, settings
 from .hub import RemoteOpError
 
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 REPO_URL = "https://github.com/CodeScaffold/ovpn-dashboard"
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"

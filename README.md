@@ -77,6 +77,64 @@ The agent shows online in the dashboard within a few seconds. Repeat step 2 and 
 
 **Why the agent needs `--privileged` and host networking, but the hub doesn't:** OpenVPN needs to configure real NAT/routing for tunneled traffic, which bridge networking can't do transparently — this is standard for any containerized VPN server. The hub does none of that, so it stays a completely ordinary container.
 
+### IPv6 traffic and leak protection
+
+The VPN must handle IPv4 and IPv6 separately. New endpoints redirect both address
+families into the tunnel. Without a configured IPv6 exit, OpenVPN rejects IPv6
+inside the tunnel so it cannot bypass the VPN through the client's normal ISP;
+IPv4 continues to work.
+
+For working IPv6 internet access, the server must already have a public IPv6
+address and a working IPv6 default route. Set `IPV6_EGRESS` to that address:
+
+- Docker: add `-e IPV6_EGRESS=YOUR_SERVER_PUBLIC_IPV6` to the agent's `docker run` command.
+- Installer: add `IPV6_EGRESS=YOUR_SERVER_PUBLIC_IPV6` alongside `HUB_URL` and `AGENT_TOKEN`.
+
+Each endpoint gets its own private IPv6 tunnel subnet. The agent enables IPv6
+forwarding and installs scoped firewall and NAT66 rules, so clients use the
+configured server address as their public IPv6 exit. No additional routed IPv6
+subnet is required. IPv4 routing and exit addresses stay the same. `BIND_IP`
+controls IPv4; choose `IPV6_EGRESS` separately when agents share a host.
+
+Per-client quotas count both address families. Clients with pinned IPv4 addresses
+also receive explicit IPv6 tunnel addresses, and bandwidth caps cover both IPv4
+and IPv6. The agent restores IPv6 forwarding/firewall rules after a reboot.
+
+**Existing endpoints need an explicit upgrade.** Updating the code or restarting
+the agent does not rewrite existing OpenVPN configs or disconnect VPN clients.
+After updating the agent code, install the root-owned helper and sudo grant:
+
+```bash
+cd /opt/ovpn-dashboard
+sudo install -o root -g root -m 755 scripts/ovpn-ipv6-ctl /usr/local/bin/ovpn-ipv6-ctl
+echo 'ovpndash ALL=(root) NOPASSWD: /usr/local/bin/ovpn-ipv6-ctl' \
+  | sudo tee /etc/sudoers.d/ovpndash-ipv6 >/dev/null
+sudo chmod 440 /etc/sudoers.d/ovpndash-ipv6
+sudo visudo -cf /etc/sudoers.d/ovpndash-ipv6
+```
+
+Add `IPV6_EGRESS=YOUR_SERVER_PUBLIC_IPV6` to `/etc/ovpn-dashboard/agent.env`, then
+prepare the existing configs. This keeps custom settings and saves an adjacent
+`.conf.pre-ipv6` backup; it refuses unmanaged IPv6/custom routing settings.
+
+```bash
+sudo bash -c 'set -a; . /etc/ovpn-dashboard/agent.env; set +a; cd /opt/ovpn-dashboard; venv/bin/python3 -m agent.ipv6 --upgrade-configs'
+sudo systemctl restart ovpn-agent
+# Activate each endpoint separately; its clients will briefly reconnect.
+sudo systemctl restart openvpn-server@ENDPOINT_NAME
+```
+
+For Docker, install the updated image with the same persistent volumes and the
+`IPV6_EGRESS` variable. Run `venv/bin/python3 -m agent.ipv6 --upgrade-configs`
+inside the container with its agent environment loaded, then restart each
+endpoint service. Recreating the container restarts its VPN services too.
+
+Clients can keep their existing `.ovpn` files: the server pushes the new IPv6
+addresses and routes when they reconnect. If a VPN app has its own **Block IPv6**
+setting, disable it to use IPv6 through the tunnel. After reconnecting, verify
+that both public addresses belong to your VPN server; a server-side test alone
+cannot verify every client device's routing.
+
 ### Multiple exit IPs on one box
 
 Add-on IPs (e.g. Hetzner Floating IPs) can each back their own fully independent server —
@@ -500,6 +558,21 @@ Nothing here touches `/etc/openvpn/*` — application updates and VPN operation 
 - Static IP assignment is an admin-only action — there is no UI or API path that lets a client choose or change their own pinned IP. If you're building IP-based access control on top of this, that boundary is what makes it trustworthy.
 - The management interface (`127.0.0.1:<port>` on each agent) is unauthenticated by OpenVPN's own design — it's protected entirely by being bound to loopback. Never change that bind address.
 - Put the hub behind a real TLS certificate (see Reverse proxy + TLS) if it's reachable from the internet at all. Session cookies are `same_site=lax`, not `secure`-only, specifically so it still works over a plain HTTP LAN tunnel — don't run it over HTTP on the public internet.
+
+## IPv6 verification
+
+```bash
+python3 -m unittest discover -s tests -v
+sudo bash tests/ipv6-integration.sh
+# Optional real-internet test on a configured Linux VPN host:
+sudo IPV6_EGRESS=YOUR_SERVER_PUBLIC_IPV6 bash tests/ipv6-egress-smoke.sh
+```
+
+The integration test uses three isolated network namespaces. The real-internet
+test uses a temporary listener and client namespace, adds scoped temporary
+firewall rules, and restores the host's IPv6 forwarding settings afterward.
+Both require OpenVPN, Python, iproute2, iptables, curl, and tc on Linux; neither
+restarts existing VPN services or uses their certificate authority.
 
 ## License
 
