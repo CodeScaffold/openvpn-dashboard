@@ -163,7 +163,7 @@ def _config_text(name: str, port: int, protocol: str, cipher: str, tun_dev: str,
         "verb 3",
     ]
     if protocol == "udp":
-        lines.append("explicit-exit-notify 1")
+        lines += ["explicit-exit-notify 1", "sndbuf 4194304", "rcvbuf 4194304"]
     lines += [
         "crl-verify crl.pem",
         f"management 127.0.0.1 {mgmt_port}",

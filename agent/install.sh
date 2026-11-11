@@ -76,7 +76,7 @@ else
 fi
 
 echo "==> Enabling IP forwarding"
-echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
+printf 'net.ipv4.ip_forward=1\nnet.core.rmem_max=4194304\nnet.core.wmem_max=4194304\n' > /etc/sysctl.d/99-openvpn.conf
 sysctl --system > /dev/null
 
 SWAP_GB="${SWAP_GB:-2}"

@@ -90,12 +90,13 @@ def reconcile() -> ReconcileResult:
                 netlimit.write_ccd(ep["ccd_dir"], name, client_ips.get(ep["name"]), disabled=True)
             result.events.append(("quota_exceeded", f'Client "{name}" hit its data quota and was disabled.'))
 
-    # enforce max_connections (aggregated across all endpoints): keep the oldest N, kill the rest
+    # enforce max_connections (aggregated across all endpoints): keep the newest N, kill the rest.
+    # A roaming client's old UDP session lingers until ping-restart; keeping the oldest locks it out.
     for name, sessions_for_name in by_name.items():
         row = limits.get(name)
         max_conn = row["max_connections"] if row else 1
         if len(sessions_for_name) > max_conn:
-            ordered = sorted(sessions_for_name, key=lambda s: s.connected_since_t)
+            ordered = sorted(sessions_for_name, key=lambda s: s.connected_since_t, reverse=True)
             excess = ordered[max_conn:]
             for s in excess:
                 log.info("client %s over max_connections (%d), killing session %s on %s",
